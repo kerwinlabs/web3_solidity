@@ -26,6 +26,8 @@ export const marketAbi = parseAbi([
 
 /** 支付代币（CalledToken / ERC20）用到的 ABI。 */
 export const erc20Abi = parseAbi([
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+  'event Approval(address indexed owner, address indexed spender, uint256 value)',
   'function name() view returns (string)',
   'function symbol() view returns (string)',
   'function decimals() view returns (uint8)',
