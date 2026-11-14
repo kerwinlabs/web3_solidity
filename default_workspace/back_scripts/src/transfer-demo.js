@@ -3,7 +3,7 @@ import 'dotenv/config';
 import { createWalletClient, formatUnits, http, parseEther } from 'viem';
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
 
-import { erc20Abi, marketAbi } from './abi.js';
+import { erc20Abi } from './abi.js';
 import { chain, publicClient } from './client.js';
 import { config } from './config.js';
 
@@ -91,14 +91,13 @@ async function main() {
     createWalletClient({ account, chain, transport: http(config.rpcUrl) }),
   );
 
-  // 代币地址：优先 .env 的 TOKEN_ADDRESS，否则调用 NFTMarket.token() 读取。
-  const tokenAddress =
-    config.tokenAddress ??
-    (await publicClient.readContract({
-      address: config.marketAddress,
-      abi: marketAbi,
-      functionName: 'token',
-    }));
+  // TokenBank demo 直接使用 .env 的 TOKEN_ADDRESS，不依赖 NFTMarket。
+  const tokenAddress = config.tokenAddress;
+  if (!tokenAddress) {
+    throw new Error(
+      'TOKEN_ADDRESS 未配置：请先运行 TokenBankDemo 部署脚本，并把 CalledToken 地址填入 .env',
+    );
+  }
   const [symbol, decimals] = await Promise.all([
     publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'symbol' }),
     publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'decimals' }),
@@ -148,7 +147,7 @@ async function main() {
   console.log('════════════════════════════════════════════════════════\n');
 
   // 1. 用账户 #0 给 #1 ~ #(N-1) 准备启动余额。
-  //    #0 是 CalledToken 部署者，部署时的 1,000,000 MTK 全部在它名下；
+  //    #0 通常是 CalledToken 部署者，部署时的 1,000,000 MTK 全部在它名下；
   //    严格说只要 #0 的 MTK 余额足够，不要求它一定是部署者。
   //    一次性读取所有余额，避免循环里反复请求 RPC。
   const balances = await Promise.all(accounts.map((account) => balanceOf(account.address)));

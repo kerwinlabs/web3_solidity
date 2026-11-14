@@ -78,6 +78,11 @@ async function main() {
   if (onChainId !== config.chainId) {
     throw new Error(`CHAIN_ID=${config.chainId} 与 RPC 实际链 ID ${onChainId} 不一致`);
   }
+  if (!config.marketAddress) {
+    throw new Error(
+      'MARKET_ADDRESS 未配置。npm run demo 仅用于 NFTMarket 演示；TokenBank 转账请用 npm run transfer',
+    );
+  }
   if (sellerAccount.address.toLowerCase() === buyerAccount.address.toLowerCase()) {
     throw new Error('卖家与买家不能是同一个地址，否则合约会拒绝购买自己的 NFT');
   }

@@ -1,0 +1,2701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TokenBank · ERC-20 Vault</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@500;600;700&display=swap"
+  rel="stylesheet"
+/>
+<!-- ethers v6 UMD，无需构建工具；需联网加载 CDN -->
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0c1322;
+    --surface-lowest: #070e1d;
+    --surface-low: #141b2b;
+    --surface: #191f2f;
+    --surface-high: #232a3a;
+    --surface-highest: #2e3545;
+    --text: #dce2f7;
+    --text-strong: #f9fafb;
+    --muted: #9ca3af;
+    --muted-soft: #bcc9cd;
+    --outline: #3d494c;
+    --primary: #4cd7f6;
+    --primary-strong: #06b6d4;
+    --on-primary: #003640;
+    --secondary: #4edea3;
+    --tertiary: #adc6ff;
+    --warn: #f59e0b;
+    --danger: #ffb4ab;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-soft: rgba(255, 255, 255, 0.04);
+    --glass: rgba(17, 24, 39, 0.72);
+    --radius: 16px;
+    --radius-md: 12px;
+    --radius-sm: 10px;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: "Sora", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --body: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { color-scheme: dark; }
+  body {
+    min-height: 100vh;
+    padding-top: 64px;
+    color: var(--text);
+    font-family: var(--body);
+    font-size: 14px;
+    line-height: 1.5;
+    background:
+      radial-gradient(900px 420px at 15% -10%, rgba(76, 215, 246, 0.08), transparent 62%),
+      radial-gradient(700px 380px at 92% 0%, rgba(173, 198, 255, 0.06), transparent 58%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  [hidden] { display: none !important; }
+  a { color: inherit; text-decoration: none; }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  ::selection { background: rgba(76, 215, 246, 0.28); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--surface-high); border-radius: 99px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .mono { font-family: var(--mono); }
+  .icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .svg-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+  /* ---------------- 顶栏 ---------------- */
+  .topbar {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 50;
+    height: 64px;
+    background: rgba(7, 14, 29, 0.82);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 1px 18px rgba(0, 0, 0, 0.35);
+  }
+  .topbar-inner {
+    max-width: 1200px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .brand-cluster, .wallet-cluster { display: flex; align-items: center; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    color: #041019;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    box-shadow: 0 0 22px rgba(76, 215, 246, 0.28);
+  }
+  .brand-mark .icon { width: 19px; height: 19px; stroke-width: 2; }
+  .brand-name {
+    font-family: var(--display);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-strong);
+  }
+  .nav { display: flex; align-items: center; gap: 2px; margin-left: 14px; }
+  .nav-link {
+    padding: 7px 14px;
+    border-radius: 9px;
+    color: var(--muted-soft);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s;
+  }
+  .nav-link:hover { color: var(--text); background: var(--surface); }
+  .nav-link.active { color: var(--primary); background: rgba(76, 215, 246, 0.08); }
+
+  .network-pill, .chain-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 999px;
+    background: var(--surface-low);
+    border: 1px solid var(--border);
+    color: var(--muted-soft);
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .network-pill .status-dot { background: var(--muted); box-shadow: none; }
+  .network-pill.ok { color: var(--secondary); border-color: rgba(78, 222, 163, 0.22); }
+  .network-pill.ok .status-dot {
+    background: var(--secondary);
+    box-shadow: 0 0 8px rgba(78, 222, 163, 0.7);
+  }
+  .chain-pill .icon { width: 14px; height: 14px; color: var(--tertiary); }
+  .chain-pill { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; }
+
+  .wallet-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 15px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--on-primary);
+    background: linear-gradient(180deg, var(--primary), var(--primary-strong));
+    font-size: 13px;
+    font-weight: 700;
+    box-shadow: 0 0 20px rgba(76, 215, 246, 0.22);
+    transition: box-shadow 0.18s, transform 0.06s, background 0.18s;
+  }
+  .wallet-btn:hover { box-shadow: 0 0 28px rgba(76, 215, 246, 0.4); }
+  .wallet-btn:active { transform: translateY(1px); }
+  .wallet-btn .icon { width: 16px; height: 16px; }
+  .wallet-btn.connected {
+    color: var(--text);
+    background: var(--surface-high);
+    border-color: var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+    box-shadow: 0 0 14px rgba(76, 215, 246, 0.12);
+    cursor: default;
+  }
+
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--muted-soft);
+    background: var(--surface-low);
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .icon-btn:hover:not(:disabled) {
+    color: var(--primary);
+    background: var(--surface-high);
+    border-color: rgba(76, 215, 246, 0.25);
+  }
+  .icon-btn:disabled { opacity: 0.4; }
+  .icon-btn.danger:hover { color: var(--danger); border-color: rgba(255, 180, 171, 0.25); }
+  .icon-btn.spinning .icon { animation: spin 0.8s linear infinite; }
+
+  /* ---------------- 提醒条 ---------------- */
+  .banner {
+    display: none;
+    max-width: 1200px;
+    margin: 18px auto 0;
+    padding: 12px 16px;
+    align-items: center;
+    gap: 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    background: rgba(245, 158, 11, 0.08);
+    color: #fbbf24;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .banner.show { display: flex; }
+  .banner .icon { color: var(--warn); }
+  .banner code {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  /* ---------------- 页面布局 ---------------- */
+  .page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 26px 24px 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+  #hub, #ledger { scroll-margin-top: 88px; }
+
+  /* ---------------- 指标卡 ---------------- */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .metric {
+    position: relative;
+    padding: 17px 18px 15px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(25, 31, 47, 0.78), rgba(17, 24, 39, 0.76));
+    box-shadow: 0 12px 30px -24px rgba(0, 0, 0, 0.9);
+    overflow: hidden;
+    transition: border-color 0.18s, transform 0.18s, background 0.18s;
+  }
+  .metric::before {
+    content: "";
+    position: absolute;
+    inset: -1px -1px auto -1px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(76, 215, 246, 0.25), transparent);
+    opacity: 0;
+    transition: opacity 0.18s;
+  }
+  .metric:hover { transform: translateY(-1px); border-color: rgba(76, 215, 246, 0.2); }
+  .metric:hover::before { opacity: 1; }
+  .metric-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .metric-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .metric-label .icon { width: 15px; height: 15px; color: var(--primary); }
+  .metric:nth-child(2) .metric-label .icon { color: var(--secondary); }
+  .metric:nth-child(3) .metric-label .icon { color: var(--tertiary); }
+  .micro-chip {
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--primary);
+    background: rgba(76, 215, 246, 0.1);
+    white-space: nowrap;
+  }
+  .metric:nth-child(2) .micro-chip {
+    color: var(--secondary);
+    background: rgba(78, 222, 163, 0.1);
+  }
+  .metric:nth-child(3) .micro-chip {
+    color: var(--tertiary);
+    background: rgba(173, 198, 255, 0.1);
+  }
+  .metric:nth-child(4) .micro-chip { color: var(--muted-soft); background: var(--surface); }
+
+  .metric-value {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    color: var(--text-strong);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .metric:nth-child(2) .metric-value { color: var(--secondary); }
+  .metric:nth-child(4) .metric-value { color: var(--primary); }
+  .metric-unit { font-family: var(--body); font-size: 12px; font-weight: 600; color: var(--muted); }
+  .metric-foot {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .metric-foot .status-dot { width: 6px; height: 6px; }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--secondary);
+    box-shadow: 0 0 7px rgba(78, 222, 163, 0.8);
+  }
+  .status-dot.cyan { background: var(--primary); box-shadow: 0 0 7px rgba(76, 215, 246, 0.8); }
+
+  /* ---------------- 存款操作台 ---------------- */
+  .hub-wrap { display: flex; justify-content: center; }
+  .hub-card {
+    width: 100%;
+    max-width: 620px;
+    padding: 22px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background:
+      linear-gradient(180deg, rgba(25, 31, 47, 0.88), rgba(17, 24, 39, 0.78));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow:
+      0 24px 48px -24px rgba(0, 0, 0, 0.75),
+      0 0 1px 1px rgba(76, 215, 246, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .hub-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .tabs {
+    display: inline-flex;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-lowest);
+    border: 1px solid var(--border-soft);
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted-soft);
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.16s, color 0.16s, box-shadow 0.16s;
+  }
+  .tab em {
+    font-family: var(--body);
+    font-size: 11px;
+    font-style: normal;
+    opacity: 0.7;
+  }
+  .tab .icon { width: 16px; height: 16px; }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    color: var(--on-primary);
+    background: var(--primary);
+    font-weight: 700;
+    box-shadow: 0 0 16px rgba(76, 215, 246, 0.3);
+  }
+  .tab.active em { opacity: 0.75; }
+
+  .hub-meta { display: flex; align-items: center; gap: 7px; }
+  .hub-meta .micro-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 9px;
+    border: 1px solid rgba(76, 215, 246, 0.15);
+    color: var(--primary);
+    background: rgba(76, 215, 246, 0.06);
+  }
+  .hub-meta .micro-chip .icon { width: 13px; height: 13px; }
+  .hub-meta .icon-btn { width: 28px; height: 28px; }
+
+  .asset-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .asset-line strong {
+    margin-left: 5px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+
+  .amount-box {
+    padding: 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface-lowest);
+    transition: border-color 0.16s, box-shadow 0.16s;
+  }
+  .amount-box:focus-within {
+    border-color: rgba(76, 215, 246, 0.6);
+    box-shadow: 0 0 0 2px rgba(76, 215, 246, 0.16);
+  }
+  .amount-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .amount-main input {
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-strong);
+    font-family: var(--mono);
+    font-size: 27px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+  }
+  .amount-main input::placeholder { color: rgba(156, 163, 175, 0.35); }
+  .token-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    height: 38px;
+    padding: 0 10px 0 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-high);
+    color: var(--text);
+  }
+  .token-avatar {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    color: var(--on-primary);
+    background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    box-shadow: 0 0 12px rgba(76, 215, 246, 0.35);
+  }
+  .token-name {
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .token-tag {
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+  }
+  .amount-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 9px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  .amount-foot > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .quick-row { display: flex; align-items: center; gap: 5px; flex: none; }
+  .quick-btn {
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--muted-soft);
+    font-family: var(--mono);
+    font-size: 10px;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .quick-btn:hover { color: var(--primary); border-color: rgba(76, 215, 246, 0.3); }
+  .quick-btn.max {
+    color: var(--primary);
+    background: rgba(76, 215, 246, 0.1);
+    font-weight: 600;
+  }
+
+  .recipient-box {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 11px 13px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface-lowest);
+    transition: border-color 0.16s, box-shadow 0.16s;
+  }
+  .recipient-box:focus-within {
+    border-color: rgba(76, 215, 246, 0.6);
+    box-shadow: 0 0 0 2px rgba(76, 215, 246, 0.16);
+  }
+  .recipient-box .icon { width: 16px; height: 16px; color: var(--muted); }
+  .recipient-box label {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .recipient-box input {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .recipient-box input::placeholder { color: rgba(156, 163, 175, 0.4); }
+
+  .breakdown {
+    padding: 13px 14px;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .break-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .break-row > span:last-child {
+    color: var(--text);
+    font-size: 11.5px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .allowance-mode {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 2px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  .allowance-mode .label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .allowance-mode label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .allowance-mode input[type="radio"] {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: var(--primary);
+  }
+  .allowance-mode .accent { color: var(--primary); }
+
+  .deposit-method {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 2px;
+  }
+  .deposit-method .label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .method-switch {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--surface-lowest);
+    border: 1px solid var(--border-soft);
+  }
+  .method-btn {
+    padding: 5px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted-soft);
+    font-family: var(--display);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.16s, color 0.16s, box-shadow 0.16s;
+  }
+  .method-btn:hover:not(.active) { color: var(--text); }
+  .method-btn.active {
+    color: var(--on-primary);
+    background: var(--primary);
+    box-shadow: 0 0 12px rgba(76, 215, 246, 0.25);
+  }
+  .mode-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: rgba(76, 215, 246, 0.06);
+    border: 1px solid rgba(76, 215, 246, 0.16);
+    color: var(--muted-soft);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .mode-note .icon {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    margin-top: 1px;
+    color: var(--primary);
+  }
+  .mode-note strong { color: var(--text); font-weight: 600; }
+  .action-grid.single { grid-template-columns: 1fr; }
+
+  .action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 46px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.16s, box-shadow 0.16s, color 0.16s, border-color 0.16s,
+      transform 0.06s, opacity 0.16s;
+  }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.45; }
+  .btn .icon { width: 17px; height: 17px; }
+  .btn-step {
+    color: var(--text);
+    background: var(--surface-high);
+    border-color: var(--border);
+  }
+  .btn-step:hover:not(:disabled) { background: var(--surface-highest); }
+  .btn-step.is-approved {
+    color: var(--secondary);
+    border-color: rgba(78, 222, 163, 0.22);
+    background: rgba(78, 222, 163, 0.08);
+  }
+  .step-tag {
+    position: absolute;
+    right: 9px;
+    top: 7px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.05em;
+  }
+  .btn-primary {
+    color: var(--on-primary);
+    background: linear-gradient(180deg, var(--primary), var(--primary-strong));
+    box-shadow: 0 0 22px rgba(76, 215, 246, 0.26);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 0 30px rgba(76, 215, 246, 0.44);
+  }
+  .btn.is-busy::after {
+    content: "";
+    width: 13px;
+    height: 13px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  .action-feedback {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 16px;
+    padding: 0 2px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .action-feedback #actionHint {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .error-text { color: var(--danger); font-weight: 500; white-space: nowrap; }
+
+  .security-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border-soft);
+    background: var(--surface-lowest);
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .security-left { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+  .security-left .icon { width: 15px; height: 15px; color: var(--secondary); }
+  .security-row .mono { font-size: 10.5px; color: var(--muted-soft); white-space: nowrap; }
+
+  /* ---------------- 账本 ---------------- */
+  .ledger { display: flex; flex-direction: column; gap: 14px; }
+  .ledger-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .ledger-title h2 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+    font-family: var(--display);
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-strong);
+  }
+  .ledger-title h2 .icon { width: 20px; height: 20px; color: var(--primary); }
+  .ledger-title h2 span { color: var(--muted); font-family: var(--body); font-size: 12px; font-weight: 400; }
+  .ledger-title p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+
+  .ledger-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .filter-bar {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 9px;
+    background: var(--surface-low);
+    border: 1px solid var(--border-soft);
+  }
+  .filter-chip {
+    padding: 6px 11px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted-soft);
+    font-size: 11.5px;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s;
+  }
+  .filter-chip:hover { color: var(--text); }
+  .filter-chip.active {
+    color: var(--on-primary);
+    background: var(--primary);
+    font-weight: 700;
+  }
+  .search-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .search-box .icon {
+    position: absolute;
+    left: 10px;
+    width: 15px;
+    height: 15px;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .search-box input {
+    width: 220px;
+    height: 34px;
+    padding: 0 12px 0 32px;
+    border-radius: 9px;
+    border: 1px solid var(--border-soft);
+    outline: none;
+    background: var(--surface-low);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .search-box input::placeholder { color: rgba(156, 163, 175, 0.55); }
+  .search-box input:focus {
+    border-color: rgba(76, 215, 246, 0.4);
+    background: var(--surface);
+  }
+
+  .table-card {
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface-low);
+    box-shadow: 0 18px 40px -30px rgba(0, 0, 0, 0.9);
+  }
+  .table-scroll { overflow-x: auto; }
+  table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: collapse;
+    text-align: left;
+  }
+  thead tr {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    padding: 11px 16px;
+    color: var(--muted);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background 0.14s; }
+  tbody tr:hover { background: rgba(35, 42, 58, 0.45); }
+
+  .type-cell { display: flex; align-items: center; gap: 10px; }
+  .type-icon {
+    width: 34px;
+    height: 34px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--surface-high);
+    color: var(--muted-soft);
+  }
+  .type-icon .icon { width: 17px; height: 17px; }
+  .type-icon.green { color: var(--secondary); background: rgba(78, 222, 163, 0.1); }
+  .type-icon.cyan { color: var(--primary); background: rgba(76, 215, 246, 0.1); }
+  .type-icon.ghost { color: var(--muted-soft); background: var(--surface-high); }
+  .type-title {
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-strong);
+    white-space: nowrap;
+  }
+  .type-sub { margin-top: 2px; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+
+  .cell-amount { font-family: var(--mono); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .cell-amount.positive { color: var(--secondary); }
+  .cell-amount.negative { color: var(--text); }
+  .cell-sub { margin-top: 2px; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+  .cell-sub .cyan { color: var(--primary); }
+
+  .hash-cell, .addr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+  }
+  .hash-chip {
+    padding: 3px 7px;
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--primary);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+  .addr-chip {
+    padding: 3px 7px;
+    border: 1px solid var(--border-soft);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--muted-soft);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .addr-chip:hover { color: var(--primary); border-color: rgba(76, 215, 246, 0.25); }
+  .mini-icon {
+    width: 22px;
+    height: 22px;
+    display: inline-grid;
+    place-items: center;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    transition: color 0.15s, background 0.15s;
+  }
+  .mini-icon:hover { color: var(--primary); background: var(--surface); }
+  .mini-icon .icon { width: 13px; height: 13px; }
+  .block-cell { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
+  .block-cell .cell-sub { font-family: var(--mono); }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(78, 222, 163, 0.1);
+    color: var(--secondary);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .status-pill .status-dot { width: 5px; height: 5px; box-shadow: 0 0 6px rgba(78, 222, 163, 0.9); }
+
+  .empty-state {
+    display: none;
+    padding: 46px 20px;
+    text-align: center;
+  }
+  .empty-state.show { display: block; }
+  .empty-icon {
+    width: 46px;
+    height: 46px;
+    margin: 0 auto 12px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--muted-soft);
+  }
+  .empty-icon .icon { width: 21px; height: 21px; }
+  .empty-title {
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .empty-sub {
+    max-width: 520px;
+    margin: 5px auto 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .table-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 14px;
+    background: var(--surface);
+    border-top: 1px solid var(--border-soft);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+  }
+  .pager { display: flex; align-items: center; gap: 5px; }
+  .pager .icon-btn { width: 26px; height: 26px; border-radius: 6px; }
+  .pager .icon-btn .icon { width: 14px; height: 14px; }
+  .page-label { min-width: 54px; text-align: center; color: var(--muted-soft); font-size: 10px; }
+
+  /* ---------------- 页脚 ---------------- */
+  .site-footer {
+    margin-top: auto;
+    border-top: 1px solid var(--border);
+    background: var(--surface-lowest);
+  }
+  .footer-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .footer-contracts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .footer-item { display: inline-flex; align-items: center; gap: 7px; }
+  .footer-item > span:first-child {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .footer-item .mono {
+    padding: 3px 7px;
+    border-radius: 5px;
+    background: var(--surface-low);
+    color: var(--muted-soft);
+    font-size: 10px;
+  }
+  .footer-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(78, 222, 163, 0.08);
+    color: var(--secondary);
+    font-size: 10px;
+  }
+  .footer-badge .icon { width: 12px; height: 12px; }
+
+  /* ---------------- Toast ---------------- */
+  .toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    max-width: 380px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface-highest);
+    color: var(--text);
+    font-size: 12.5px;
+    box-shadow: 0 20px 44px -18px rgba(0, 0, 0, 0.8);
+    opacity: 0;
+    transform: translateY(14px);
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast .icon { width: 17px; height: 17px; color: var(--secondary); }
+  .toast.error { border-color: rgba(255, 180, 171, 0.28); }
+  .toast.error .icon { color: var(--danger); }
+  .toast.info .icon { color: var(--primary); }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------------- 响应式 ---------------- */
+  @media (max-width: 1080px) {
+    .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nav { display: none; }
+  }
+  @media (max-width: 760px) {
+    .topbar-inner { padding: 0 16px; }
+    .chain-pill { display: none; }
+    .page { padding: 20px 16px 44px; gap: 26px; }
+    .banner { margin: 14px 16px 0; }
+    .metrics-grid { gap: 10px; }
+    .metric { padding: 14px; }
+    .metric-value { font-size: 20px; }
+    .hub-card { padding: 17px; border-radius: 14px; }
+    .tabs { width: 100%; }
+    .tab { flex: 1; justify-content: center; padding: 8px 6px; }
+    .tab em { display: none; }
+    .ledger-head { align-items: flex-start; flex-direction: column; }
+    .ledger-tools { width: 100%; }
+    .search-box { flex: 1; }
+    .search-box input { width: 100%; }
+    .action-grid { grid-template-columns: 1fr; }
+    .footer-inner { padding: 16px; }
+  }
+  @media (max-width: 520px) {
+    .metrics-grid { grid-template-columns: 1fr; }
+    .hub-top { flex-wrap: wrap; }
+    .hub-meta { width: 100%; justify-content: flex-end; }
+    .network-pill { display: none; }
+    .filter-bar { overflow-x: auto; max-width: 100%; }
+    .amount-main input { font-size: 22px; }
+    .allowance-mode { flex-wrap: wrap; }
+    .deposit-method { flex-wrap: wrap; }
+    .amount-foot { align-items: flex-start; flex-direction: column; }
+    .toast { right: 14px; left: 14px; bottom: 14px; max-width: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 内联 SVG 图标库 -->
+<svg class="svg-sprite" aria-hidden="true">
+  <symbol id="i-logo" viewBox="0 0 24 24">
+    <path d="M12 2 21 8.5 12 22 3 8.5 12 2Z" />
+    <path d="M3 8.5h18M12 2v20" />
+  </symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24">
+    <path d="M4 7.5h13a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11" />
+    <path d="M16.5 12H21v4h-4.5a2 2 0 1 1 0-4Z" />
+  </symbol>
+  <symbol id="i-down-left" viewBox="0 0 24 24">
+    <path d="M17 7 7 17" /><path d="M7 9v8h8" />
+  </symbol>
+  <symbol id="i-up-right" viewBox="0 0 24 24">
+    <path d="M7 17 17 7" /><path d="M9 7h8v8" />
+  </symbol>
+  <symbol id="i-vault" viewBox="0 0 24 24">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 8v1M12 15v1M8 12h1M15 12h1" />
+  </symbol>
+  <symbol id="i-coins" viewBox="0 0 24 24">
+    <ellipse cx="9" cy="7" rx="5" ry="3" />
+    <path d="M4 7v4c0 1.7 2.2 3 5 3s5-1.3 5-3V7" />
+    <path d="M9 14v3c0 1.7 2.2 3 5 3s5-1.3 5-3v-4c0-1.7-2.2-3-5-3" />
+  </symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24">
+    <path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z" />
+    <path d="m9 12 2 2 4-4" />
+  </symbol>
+  <symbol id="i-history" viewBox="0 0 24 24">
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 3v5h5" /><path d="M12 7v5l3 2" />
+  </symbol>
+  <symbol id="i-search" viewBox="0 0 24 24">
+    <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+  </symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24">
+    <path d="M20 11a8 8 0 0 0-14-4L3 10" /><path d="M3 4v6h6" />
+    <path d="M4 13a8 8 0 0 0 14 4l3-3" /><path d="M21 20v-6h-6" />
+  </symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24">
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a1 1 0 0 1 1-1h10" />
+  </symbol>
+  <symbol id="i-external" viewBox="0 0 24 24">
+    <path d="M14 4h6v6" /><path d="M20 4 11 13" />
+    <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+  </symbol>
+  <symbol id="i-info" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" />
+  </symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24">
+    <path d="M10 5H5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h5" />
+    <path d="m15 8 4 4-4 4" /><path d="M9 12h10" />
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" />
+  </symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" /></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24">
+    <rect x="5" y="10" width="14" height="10" rx="2" />
+    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+  </symbol>
+  <symbol id="i-network" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="9" /><path d="M3 12h18" />
+    <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
+  </symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" /></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24">
+    <path d="M12 3 2 21h20L12 3Z" /><path d="M12 9v5" /><path d="M12 17h.01" />
+  </symbol>
+</svg>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand-cluster">
+      <a class="brand" href="#hub">
+        <span class="brand-mark"><svg class="icon"><use href="#i-logo" /></svg></span>
+        <span class="brand-name">TokenBank</span>
+      </a>
+      <nav class="nav">
+        <a class="nav-link active" href="#hub">存款</a>
+        <a class="nav-link" href="#ledger">记录</a>
+      </nav>
+    </div>
+    <div class="wallet-cluster">
+      <span class="network-pill" id="networkPill">
+        <span class="status-dot"></span><span id="networkLabel">未连接</span>
+      </span>
+      <span class="chain-pill">
+        <svg class="icon"><use href="#i-network" /></svg>
+        <span id="chainLabel">ANVIL · 31337</span>
+      </span>
+      <button class="wallet-btn" id="connectBtn" type="button">
+        <svg class="icon"><use href="#i-wallet" /></svg>
+        <span id="connectText">连接钱包</span>
+      </button>
+      <button class="icon-btn danger" id="disconnectBtn" type="button" title="断开钱包" hidden>
+        <svg class="icon"><use href="#i-logout" /></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="banner" id="configBanner">
+  <svg class="icon"><use href="#i-alert" /></svg>
+  <span>
+    请先在 <code>back_scripts/.env</code> 填写 <code>BANK_ADDRESS</code>（部署 TokenBank 后）并重启
+    <code>npm run indexer</code>；也可以在网址后加 <code>?bank=0x…</code> 临时覆盖。
+  </span>
+</div>
+
+<main class="page">
+  <!-- 顶部指标 -->
+  <section class="metrics-grid">
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label"><svg class="icon"><use href="#i-vault" /></svg>TokenBank TVL</span>
+        <span class="micro-chip">总存款</span>
+      </div>
+      <div class="metric-value"><span id="tvlValue">--</span><span class="metric-unit js-symbol">MTK</span></div>
+      <div class="metric-foot">所有用户存入的 Token 总量</div>
+    </article>
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label"><svg class="icon"><use href="#i-coins" /></svg>My Deposit</span>
+        <span class="micro-chip">已存入</span>
+      </div>
+      <div class="metric-value"><span id="depositValue">--</span><span class="metric-unit js-symbol">MTK</span></div>
+      <div class="metric-foot">当前可取款上限</div>
+    </article>
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label"><svg class="icon"><use href="#i-wallet" /></svg>Wallet Balance</span>
+        <span class="micro-chip">ERC-20</span>
+      </div>
+      <div class="metric-value"><span id="walletValue">--</span><span class="metric-unit js-symbol">MTK</span></div>
+      <div class="metric-foot">当前钱包可用余额</div>
+    </article>
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label"><svg class="icon"><use href="#i-shield" /></svg>Contract Allowance</span>
+        <span class="micro-chip">授权额度</span>
+      </div>
+      <div class="metric-value"><span id="allowanceMetric">--</span><span class="metric-unit js-symbol">MTK</span></div>
+      <div class="metric-foot"><span class="status-dot cyan"></span>Status: Safe ERC-20</div>
+    </article>
+  </section>
+
+  <!-- 居中操作台 -->
+  <section class="hub-wrap" id="hub">
+    <div class="hub-card">
+      <div class="hub-top">
+        <div class="tabs" role="tablist" aria-label="存款、取款或转账">
+          <button class="tab active" id="tabDeposit" type="button" role="tab" aria-selected="true">
+            <svg class="icon"><use href="#i-down-left" /></svg>
+            <span>Deposit <em>存款</em></span>
+          </button>
+          <button class="tab" id="tabWithdraw" type="button" role="tab" aria-selected="false">
+            <svg class="icon"><use href="#i-up-right" /></svg>
+            <span>Withdraw <em>取款</em></span>
+          </button>
+          <button class="tab" id="tabTransfer" type="button" role="tab" aria-selected="false">
+            <svg class="icon"><use href="#i-external" /></svg>
+            <span>Transfer <em>转账</em></span>
+          </button>
+        </div>
+        <div class="hub-meta">
+          <span class="micro-chip"><svg class="icon"><use href="#i-bolt" /></svg>LOCAL</span>
+          <button class="icon-btn" id="infoBtn" type="button" title="查看合约信息">
+            <svg class="icon"><use href="#i-info" /></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="asset-line">
+        <span id="assetLabel">存入资产</span>
+        <span>余额 <strong id="assetBalance">-- MTK</strong></span>
+      </div>
+
+      <div class="amount-box">
+        <div class="amount-main">
+          <input
+            id="amountInput"
+            type="text"
+            inputmode="decimal"
+            placeholder="0.00"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="token-pill">
+            <span class="token-avatar" id="tokenAvatar">M</span>
+            <span class="token-name" id="tokenPillSymbol">MTK</span>
+            <span class="token-tag">ERC-20</span>
+          </div>
+        </div>
+        <div class="amount-foot">
+          <span id="amountHint">存入数量将 1:1 记入 TokenBank 账本</span>
+          <div class="quick-row">
+            <button class="quick-btn" type="button" data-pct="25">25%</button>
+            <button class="quick-btn" type="button" data-pct="50">50%</button>
+            <button class="quick-btn" type="button" data-pct="75">75%</button>
+            <button class="quick-btn max" type="button" data-pct="100">MAX</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="recipient-box" id="recipientRow" hidden>
+        <svg class="icon"><use href="#i-wallet" /></svg>
+        <label for="recipientInput">接收地址</label>
+        <input
+          id="recipientInput"
+          type="text"
+          placeholder="0x…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <div class="breakdown">
+        <div class="break-row">
+          <span id="breakAvailLabel">可用余额</span>
+          <span class="mono" id="breakAvailValue">--</span>
+        </div>
+        <div class="break-row" id="breakAllowanceRow">
+          <span>当前授权额度</span>
+          <span class="mono" id="breakAllowanceValue">--</span>
+        </div>
+        <div class="break-row">
+          <span>TokenBank 合约</span>
+          <span class="mono" id="breakBank">未配置</span>
+        </div>
+        <div class="break-row">
+          <span>网络</span>
+          <span class="mono" id="breakNetwork">ANVIL · 31337</span>
+        </div>
+      </div>
+
+      <div class="deposit-method" id="depositMethodRow">
+        <span class="label">Deposit Mode / 存款方式</span>
+        <div class="method-switch" role="radiogroup" aria-label="存款方式">
+          <button
+            class="method-btn active"
+            type="button"
+            role="radio"
+            aria-checked="true"
+            data-deposit-method="approve"
+            title="先 approve，再调用 deposit"
+          >两步授权</button>
+          <button
+            class="method-btn"
+            type="button"
+            role="radio"
+            aria-checked="false"
+            data-deposit-method="transferAndCall"
+            title="调用 CalledToken.transferAndCall 一步完成"
+          >一步快速</button>
+        </div>
+      </div>
+
+      <div class="mode-note" id="quickDepositNote" hidden>
+        <svg class="icon"><use href="#i-bolt" /></svg>
+        <span><strong>一步存款：</strong>调用 <span class="mono">transferAndCall</span>，
+        Token 转入与 TokenBank 记账在同一笔交易完成，无需 approve；仅适用于 CalledToken。</span>
+      </div>
+
+      <div class="allowance-mode" id="allowanceModeRow">
+        <span class="label">Allowance Mode / 授权模式</span>
+        <label><input type="radio" name="allowanceMode" value="exact" checked /><span>精确金额</span></label>
+        <label><input type="radio" name="allowanceMode" value="unlimited" /><span class="accent">无限授权</span></label>
+      </div>
+
+      <div class="action-grid" id="depositActions">
+        <button class="btn btn-step" id="approveBtn" type="button">
+          <svg class="icon" id="approveIcon"><use href="#i-shield" /></svg>
+          <span id="approveBtnText">Step 1: 授权</span>
+          <span class="step-tag">01</span>
+        </button>
+        <button class="btn btn-primary" id="depositBtn" type="button">
+          <svg class="icon" id="depositIcon"><use href="#i-lock" /></svg>
+          <span id="depositBtnText">Step 2: 确认存款</span>
+        </button>
+      </div>
+
+      <div class="action-grid" id="withdrawActions" hidden>
+        <button class="btn btn-step is-approved" type="button" disabled>
+          <svg class="icon"><use href="#i-check-circle" /></svg>
+          <span>Step 1: 无需授权</span>
+          <span class="step-tag">01</span>
+        </button>
+        <button class="btn btn-primary" id="withdrawBtn" type="button">
+          <svg class="icon"><use href="#i-up-right" /></svg>
+          <span id="withdrawBtnText">Step 2: 确认取款</span>
+        </button>
+      </div>
+
+      <div class="action-grid" id="transferActions" hidden>
+        <button class="btn btn-step is-approved" type="button" disabled>
+          <svg class="icon"><use href="#i-check-circle" /></svg>
+          <span>Step 1: 无需授权</span>
+          <span class="step-tag">01</span>
+        </button>
+        <button class="btn btn-primary" id="transferBtn" type="button">
+          <svg class="icon"><use href="#i-external" /></svg>
+          <span id="transferBtnText">Step 2: 确认转账</span>
+        </button>
+      </div>
+
+      <div class="action-feedback">
+        <span id="actionHint">连接钱包后即可操作</span>
+        <span class="error-text" id="actionErr"></span>
+      </div>
+
+      <div class="security-row">
+        <span class="security-left">
+          <svg class="icon"><use href="#i-shield" /></svg>
+          <span>绑定 CalledToken · 非托管</span>
+        </span>
+        <span class="mono" id="securityBank">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 交易账本 -->
+  <section class="ledger" id="ledger">
+    <div class="ledger-head">
+      <div class="ledger-title">
+        <h2>
+          <svg class="icon"><use href="#i-history" /></svg>
+          Transaction Ledger <span>&amp; History（转账与存款记录）</span>
+        </h2>
+        <p>来自索引服务的 ERC-20 Transfer 实时记录，包含存入、取款与普通转账。</p>
+      </div>
+      <div class="ledger-tools">
+        <div class="filter-bar" id="filterBar">
+          <button class="filter-chip active" type="button" data-filter="all">All</button>
+          <button class="filter-chip" type="button" data-filter="deposit">Deposits</button>
+          <button class="filter-chip" type="button" data-filter="withdraw">Withdrawals</button>
+          <button class="filter-chip" type="button" data-filter="transfer">Transfers</button>
+        </div>
+        <div class="search-box">
+          <svg class="icon"><use href="#i-search" /></svg>
+          <input id="searchInput" type="text" placeholder="搜索 Tx Hash / 地址" autocomplete="off" />
+        </div>
+        <button class="icon-btn" id="refreshBtn" type="button" title="刷新记录">
+          <svg class="icon"><use href="#i-refresh" /></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-scroll">
+        <table id="ledgerTable">
+          <thead>
+            <tr>
+              <th>Type &amp; Action</th>
+              <th>Asset &amp; Amount</th>
+              <th>Counterparty</th>
+              <th>Transaction Hash</th>
+              <th>Block &amp; Time</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="ledgerBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon"><svg class="icon"><use id="emptyIconUse" href="#i-history" /></svg></div>
+        <div class="empty-title" id="emptyTitle">连接钱包</div>
+        <div class="empty-sub" id="emptyText">连接钱包后，这里会显示该地址在索引服务中的转账记录。</div>
+      </div>
+      <div class="table-footer">
+        <span id="showingText">—</span>
+        <div class="pager">
+          <button class="icon-btn" id="prevPage" type="button" disabled>
+            <svg class="icon"><use href="#i-chevron-left" /></svg>
+          </button>
+          <span class="page-label" id="pageLabel">1 / 1</span>
+          <button class="icon-btn" id="nextPage" type="button" disabled>
+            <svg class="icon"><use href="#i-chevron-right" /></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-contracts">
+      <span class="footer-item"><span>Bank</span><span class="mono" id="footerBank">—</span></span>
+      <span class="footer-item"><span>Token</span><span class="mono" id="footerToken">—</span></span>
+      <span class="footer-badge"><svg class="icon"><use href="#i-shield" /></svg>CalledToken Ready</span>
+    </div>
+    <div>© 2026 TokenBank Protocol · Local demo</div>
+  </div>
+</footer>
+
+<div class="toast" id="toast">
+  <svg class="icon" id="toastIcon"><use href="#i-check-circle" /></svg>
+  <span id="toastText"></span>
+</div>
+
+<script>
+/* =========================================================================
+ * 配置
+ * - tokenAddress 默认使用 anvil 上已部署的 CalledToken；
+ * - bankAddress 留空时自动读取索引服务 GET /api/status 返回的 BANK_ADDRESS；
+ * - 页面由 `npm run indexer` 托管，API 默认同源；直接双击打开时回退到 3000 端口。
+ * URL 覆盖：?token=0x…&bank=0x…&api=http://127.0.0.1:3000&chainId=31337&rpc=…
+ * ========================================================================= */
+const CONFIG = {
+  chainId: 31337,
+  rpcUrl: "http://127.0.0.1:8545",
+  tokenAddress: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+  bankAddress: "",
+  tokenPinned: false,
+  apiBase: (location.protocol === "http:" || location.protocol === "https:")
+    ? location.origin
+    : "http://127.0.0.1:3000",
+  recordsLimit: 200,
+  pageSize: 10,
+};
+
+(function applyUrlOverrides() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("token")) {
+    CONFIG.tokenAddress = q.get("token");
+    CONFIG.tokenPinned = true;
+  }
+  if (q.get("bank")) CONFIG.bankAddress = q.get("bank");
+  if (q.get("api")) CONFIG.apiBase = q.get("api").replace(/\/+$/, "");
+  if (q.get("chainId")) CONFIG.chainId = Number(q.get("chainId"));
+  if (q.get("rpc")) CONFIG.rpcUrl = q.get("rpc");
+})();
+
+/* ---------------------------- 合约 ABI ---------------------------- */
+const ERC20_ABI = [
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function transfer(address to, uint256 amount) returns (bool)",
+  "function transferAndCall(address to, uint256 amount, bytes data) returns (bool)",
+];
+
+const BANK_ABI = [
+  "function deposits(address) view returns (uint256)",
+  "function totalDeposits() view returns (uint256)",
+  "function deposit(uint256 amount)",
+  "function withdraw(uint256 amount)",
+];
+
+/* ---------------------------- 状态 ---------------------------- */
+const state = {
+  provider: null,
+  signer: null,
+  account: null,
+  token: null,
+  bank: null,
+  decimals: 18,
+  symbol: "MTK",
+  walletBalance: 0n,
+  depositBalance: 0n,
+  allowance: 0n,
+  tvl: 0n,
+  tvlLoaded: false,
+  mode: "deposit",
+  depositMethod: "approve",
+  records: [],
+  recordsError: "",
+  filter: "all",
+  search: "",
+  page: 0,
+  refreshing: false,
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------------------------- 工具函数 ---------------------------- */
+function isValidAddress(value) {
+  return typeof value === "string" && ethers.isAddress(value);
+}
+
+function isConfigured() {
+  return isValidAddress(CONFIG.tokenAddress) && isValidAddress(CONFIG.bankAddress);
+}
+
+function isUnlimitedMode() {
+  const el = document.querySelector('input[name="allowanceMode"][value="unlimited"]');
+  return Boolean(el && el.checked);
+}
+
+function isQuickDepositMode() {
+  return state.depositMethod === "transferAndCall";
+}
+
+function applyDepositMethodUI() {
+  const isDeposit = state.mode === "deposit";
+  const quick = isQuickDepositMode();
+
+  $("depositMethodRow").hidden = !isDeposit;
+  $("allowanceModeRow").hidden = !isDeposit || quick;
+  $("breakAllowanceRow").hidden = !isDeposit || quick;
+  $("quickDepositNote").hidden = !isDeposit || !quick;
+  $("approveBtn").hidden = quick;
+  $("depositActions").classList.toggle("single", quick);
+
+  document.querySelectorAll("[data-deposit-method]").forEach((btn) => {
+    const active = btn.dataset.depositMethod === state.depositMethod;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-checked", String(active));
+  });
+}
+
+function setDepositMethod(method) {
+  state.depositMethod = method === "transferAndCall" ? "transferAndCall" : "approve";
+  applyDepositMethodUI();
+  updateButtons();
+}
+
+function shortAddress(addr) {
+  if (!addr) return "未配置";
+  return addr.slice(0, 6) + "…" + addr.slice(-4);
+}
+
+function parseAmount(raw) {
+  const v = String(raw || "").trim();
+  if (!v) throw new Error("请输入数量");
+  if (!/^\d+(\.\d+)?$/.test(v)) throw new Error("数量格式不正确");
+  const value = ethers.parseUnits(v, state.decimals);
+  if (value === 0n) throw new Error("数量必须大于 0");
+  return value;
+}
+
+function fmtAmount(value) {
+  const s = ethers.formatUnits(value, state.decimals);
+  const [intPart, fracPart = ""] = s.split(".");
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  let frac = fracPart.replace(/0+$/, "");
+  if (frac.length > 6) frac = frac.slice(0, 6) + "…";
+  return frac ? grouped + "." + frac : grouped;
+}
+
+function rawAmount(value) {
+  const s = ethers.formatUnits(value, state.decimals);
+  return s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
+}
+
+function isInfiniteAllowance(value) {
+  return value >= ethers.MaxUint256 / 2n;
+}
+
+function timeAgo(iso) {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const diff = Math.max(0, Date.now() - t);
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + " 分钟前";
+  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + " 小时前";
+  return Math.floor(diff / 86_400_000) + " 天前";
+}
+
+function explorerTx(hash) {
+  const map = {
+    11155111: "https://sepolia.etherscan.io/tx/",
+    84532: "https://sepolia.basescan.org/tx/",
+    1: "https://etherscan.io/tx/",
+  };
+  return map[CONFIG.chainId] ? map[CONFIG.chainId] + hash : null;
+}
+
+function humanError(e) {
+  if (!e) return "操作失败";
+  if (e.code === "ACTION_REJECTED" || e.code === 4001) return "你已取消交易";
+  return e.shortMessage || e.reason || e.message || "操作失败";
+}
+
+let toastTimer;
+function toast(message, type = "success") {
+  $("toastText").textContent = message;
+  $("toastIcon").querySelector("use").setAttribute(
+    "href",
+    type === "error" ? "#i-alert" : type === "info" ? "#i-info" : "#i-check-circle",
+  );
+  const el = $("toast");
+  el.className = "toast show " + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 4200);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("已复制：" + shortAddress(text), "info");
+  } catch (_) {
+    toast(text, "info");
+  }
+}
+
+function setActionBusy(btn, textEl, busy, busyText) {
+  if (busy) {
+    btn.dataset.prevText = textEl.textContent;
+    textEl.textContent = busyText;
+    btn.dataset.busy = "1";
+    btn.disabled = true;
+    btn.classList.add("is-busy");
+  } else {
+    textEl.textContent = btn.dataset.prevText || textEl.textContent;
+    delete btn.dataset.busy;
+    btn.classList.remove("is-busy");
+    updateButtons();
+  }
+}
+
+/* ---------------------------- 元数据与指标 ---------------------------- */
+function applyMeta() {
+  document.title = "TokenBank · " + state.symbol + " Vault";
+  document.querySelectorAll(".js-symbol").forEach((el) => (el.textContent = state.symbol));
+  $("tokenPillSymbol").textContent = state.symbol;
+  $("tokenAvatar").textContent = (state.symbol || "T").slice(0, 1).toUpperCase();
+  $("footerToken").textContent = shortAddress(CONFIG.tokenAddress);
+  $("footerBank").textContent = shortAddress(CONFIG.bankAddress);
+  $("securityBank").textContent = shortAddress(CONFIG.bankAddress);
+  $("breakBank").textContent = shortAddress(CONFIG.bankAddress);
+  $("chainLabel").textContent =
+    (CONFIG.chainId === 31337 ? "ANVIL" : "CHAIN") + " · " + CONFIG.chainId;
+  $("breakNetwork").textContent =
+    (CONFIG.chainId === 31337 ? "ANVIL" : "CHAIN") + " · " + CONFIG.chainId;
+}
+
+function renderMetrics() {
+  const connected = Boolean(state.account);
+  $("tvlValue").textContent = state.tvlLoaded ? fmtAmount(state.tvl) : "--";
+  $("depositValue").textContent = connected ? fmtAmount(state.depositBalance) : "--";
+  $("walletValue").textContent = connected ? fmtAmount(state.walletBalance) : "--";
+  $("allowanceMetric").textContent = connected
+    ? (isInfiniteAllowance(state.allowance) ? "∞" : fmtAmount(state.allowance))
+    : "--";
+
+  const base = state.mode === "withdraw" ? state.depositBalance : state.walletBalance;
+  $("assetBalance").textContent = connected
+    ? fmtAmount(base) + " " + state.symbol
+    : "-- " + state.symbol;
+  $("breakAvailValue").textContent = connected
+    ? fmtAmount(base) + " " + state.symbol
+    : "--";
+  $("breakAllowanceValue").textContent = connected
+    ? (isInfiniteAllowance(state.allowance) ? "无限" : fmtAmount(state.allowance) + " " + state.symbol)
+    : "--";
+}
+
+/* ---------------------------- 索引服务 ---------------------------- */
+async function hydrateFromApi() {
+  try {
+    const res = await fetch(CONFIG.apiBase + "/api/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!CONFIG.bankAddress && data.bankAddress) CONFIG.bankAddress = data.bankAddress;
+    // 索引服务的 TOKEN_ADDRESS 优先于页面里的 anvil 默认值；?token=… 显式覆盖时除外。
+    if (!CONFIG.tokenPinned && data.token) CONFIG.tokenAddress = data.token;
+    if (data.symbol) state.symbol = data.symbol;
+    if (Number.isInteger(data.decimals)) state.decimals = data.decimals;
+  } catch (_) {
+    // 索引服务没启动时不影响钱包连接，只是没有 bank 地址和转账记录。
+  }
+}
+
+/** 不连接钱包也能从 RPC 读取代币元数据和 TokenBank TVL。 */
+async function loadPublicData() {
+  if (!isValidAddress(CONFIG.tokenAddress)) return;
+  try {
+    const provider = new ethers.JsonRpcProvider(CONFIG.rpcUrl, CONFIG.chainId);
+    const token = new ethers.Contract(CONFIG.tokenAddress, ERC20_ABI, provider);
+    const [symbol, decimals] = await Promise.all([token.symbol(), token.decimals()]);
+    state.symbol = symbol;
+    state.decimals = Number(decimals);
+    applyMeta();
+
+    if (isValidAddress(CONFIG.bankAddress)) {
+      const bank = new ethers.Contract(CONFIG.bankAddress, BANK_ABI, provider);
+      state.tvl = await bank.totalDeposits();
+      state.tvlLoaded = true;
+    }
+  } catch (e) {
+    console.warn("读取链上公共数据失败：", humanError(e));
+  }
+  renderMetrics();
+}
+
+/* ---------------------------- 钱包连接 ---------------------------- */
+async function ensureChain(provider) {
+  const network = await provider.getNetwork();
+  if (Number(network.chainId) === CONFIG.chainId) return;
+
+  const hexChainId = "0x" + CONFIG.chainId.toString(16);
+  try {
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: hexChainId }],
+    });
+  } catch (e) {
+    const code = e?.code ?? e?.info?.error?.code ?? e?.data?.originalError?.code;
+    if (code === 4902) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: hexChainId,
+          chainName: CONFIG.chainId === 31337 ? "Anvil Local" : "Chain " + CONFIG.chainId,
+          nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+          rpcUrls: [CONFIG.rpcUrl],
+        }],
+      });
+      // 部分钱包添加后不会自动切换，再请求一次。
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: hexChainId }],
+      });
+      return;
+    }
+    throw new Error("请把钱包切换到 chainId " + CONFIG.chainId);
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) {
+    toast("未检测到钱包扩展，请先安装 MetaMask", "error");
+    return;
+  }
+  if (!isConfigured()) {
+    $("configBanner").classList.add("show");
+    toast("请先配置 tokenAddress / bankAddress", "error");
+    return;
+  }
+
+  try {
+    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await ensureChain(provider);
+    await setup(accounts[0], provider);
+    toast("钱包已连接");
+  } catch (e) {
+    toast(humanError(e), "error");
+  }
+}
+
+async function setup(account, existingProvider) {
+  state.provider = existingProvider || new ethers.BrowserProvider(window.ethereum);
+  state.signer = await state.provider.getSigner();
+  state.account = ethers.getAddress(account);
+  state.token = new ethers.Contract(CONFIG.tokenAddress, ERC20_ABI, state.signer);
+  state.bank = new ethers.Contract(CONFIG.bankAddress, BANK_ABI, state.signer);
+
+  try {
+    state.decimals = Number(await state.token.decimals());
+    state.symbol = await state.token.symbol();
+  } catch (_) {
+    toast("读取代币信息失败，请检查合约地址是否正确", "error");
+  }
+
+  applyMeta();
+  updateWalletUI();
+  await refreshAll();
+}
+
+function disconnect() {
+  try { state.provider?.removeAllListeners(); } catch (_) {}
+  state.provider = null;
+  state.signer = null;
+  state.account = null;
+  state.token = null;
+  state.bank = null;
+  state.walletBalance = 0n;
+  state.depositBalance = 0n;
+  state.allowance = 0n;
+  state.records = [];
+  state.recordsError = "";
+  state.page = 0;
+
+  updateWalletUI();
+  renderMetrics();
+  renderLedger();
+  updateButtons();
+}
+
+function updateWalletUI() {
+  const connected = Boolean(state.account);
+  const btn = $("connectBtn");
+  const text = $("connectText");
+
+  btn.classList.toggle("connected", connected);
+  btn.title = connected ? state.account : "";
+  text.textContent = connected ? shortAddress(state.account) : "连接钱包";
+  $("disconnectBtn").hidden = !connected;
+
+  $("networkPill").classList.toggle("ok", connected);
+  $("networkLabel").textContent = connected
+    ? (CONFIG.chainId === 31337 ? "本地链" : "链 " + CONFIG.chainId)
+    : "未连接";
+}
+
+async function refreshAll() {
+  if (!state.account || state.refreshing) return;
+  state.refreshing = true;
+  try {
+    await Promise.all([refreshBalances(), loadRecords()]);
+  } catch (e) {
+    console.error(e);
+    toast(humanError(e), "error");
+  } finally {
+    state.refreshing = false;
+    updateButtons();
+  }
+}
+
+async function refreshBalances() {
+  if (!state.account) return;
+  const [wallet, deposit, allowance, tvl] = await Promise.all([
+    state.token.balanceOf(state.account),
+    state.bank.deposits(state.account),
+    state.token.allowance(state.account, CONFIG.bankAddress),
+    state.bank.totalDeposits(),
+  ]);
+  state.walletBalance = wallet;
+  state.depositBalance = deposit;
+  state.allowance = allowance;
+  state.tvl = tvl;
+  state.tvlLoaded = true;
+  renderMetrics();
+  updateButtons();
+}
+
+/* ---------------------------- 模式切换 ---------------------------- */
+function setMode(mode) {
+  state.mode = ["deposit", "withdraw", "transfer"].includes(mode) ? mode : "deposit";
+  const isDeposit = state.mode === "deposit";
+  const isWithdraw = state.mode === "withdraw";
+  const isTransfer = state.mode === "transfer";
+
+  $("tabDeposit").classList.toggle("active", isDeposit);
+  $("tabWithdraw").classList.toggle("active", isWithdraw);
+  $("tabTransfer").classList.toggle("active", isTransfer);
+  $("tabDeposit").setAttribute("aria-selected", String(isDeposit));
+  $("tabWithdraw").setAttribute("aria-selected", String(isWithdraw));
+  $("tabTransfer").setAttribute("aria-selected", String(isTransfer));
+
+  $("depositActions").hidden = !isDeposit;
+  $("withdrawActions").hidden = !isWithdraw;
+  $("transferActions").hidden = !isTransfer;
+  $("recipientRow").hidden = !isTransfer;
+  applyDepositMethodUI();
+
+  $("assetLabel").textContent = isDeposit
+    ? "存入资产"
+    : isWithdraw
+      ? "提取资产"
+      : "转出资产";
+  $("breakAvailLabel").textContent = isWithdraw ? "可提取上限" : "可用余额";
+  $("amountHint").textContent = isDeposit
+    ? "存入数量将 1:1 记入 TokenBank 账本"
+    : isWithdraw
+      ? "只能取回自己已存入的 Token"
+      : "输入接收地址和要转出的数量";
+  $("amountInput").value = "";
+
+  renderMetrics();
+  updateButtons();
+}
+
+/* ---------------------------- 按钮状态 ---------------------------- */
+function updateButtons() {
+  const connected = Boolean(state.account);
+
+  let amount = null;
+  let amountError = "";
+  try {
+    amount = parseAmount($("amountInput").value);
+  } catch (e) {
+    amountError = $("amountInput").value.trim() ? e.message : "";
+  }
+
+  let hint = "连接钱包后即可操作";
+  let err = amountError;
+
+  if (state.mode === "deposit") {
+    const quick = isQuickDepositMode();
+    const unlimited = isUnlimitedMode();
+    const approved = connected && (unlimited
+      ? isInfiniteAllowance(state.allowance)
+      : amount !== null && state.allowance >= amount);
+
+    const approveBtn = $("approveBtn");
+    if (!approveBtn.dataset.busy) {
+      approveBtn.disabled = !connected || approved || (!unlimited && amount === null);
+      approveBtn.classList.toggle("is-approved", approved);
+      $("approveBtnText").textContent = approved
+        ? "Step 1: 已授权"
+        : unlimited
+          ? "Step 1: 无限授权"
+          : "Step 1: 授权 " + state.symbol;
+      $("approveIcon").querySelector("use").setAttribute(
+        "href",
+        approved ? "#i-check-circle" : "#i-shield",
+      );
+    }
+
+    const depositBtn = $("depositBtn");
+    if (!depositBtn.dataset.busy) {
+      depositBtn.disabled =
+        !connected || amount === null || amount > state.walletBalance || (!quick && !approved);
+      $("depositBtnText").textContent = quick
+        ? "一步存款 · transferAndCall"
+        : "Step 2: 确认存款";
+      $("depositIcon").querySelector("use").setAttribute(
+        "href",
+        quick ? "#i-bolt" : "#i-lock",
+      );
+    }
+
+    if (connected) {
+      if (amount === null) {
+        hint = quick
+          ? "输入金额后，一次交易完成转账与记账"
+          : "输入金额后先授权，再确认存款";
+      } else if (amount > state.walletBalance) {
+        hint = "钱包余额不足以完成此次存款";
+        err = "余额不足";
+      } else if (quick) {
+        hint = "确认后将调用 transferAndCall 一步存入 TokenBank";
+      } else if (!approved) {
+        hint = "请先完成 Step 1 授权";
+      } else {
+        hint = "授权已就绪，确认后将存入 TokenBank";
+      }
+    }
+  } else if (state.mode === "withdraw") {
+    const withdrawBtn = $("withdrawBtn");
+    if (!withdrawBtn.dataset.busy) {
+      withdrawBtn.disabled = !connected || amount === null || amount > state.depositBalance;
+      $("withdrawBtnText").textContent = "Step 2: 确认取款";
+    }
+
+    if (connected) {
+      if (amount === null) {
+        hint = "输入要取回的金额";
+      } else if (amount > state.depositBalance) {
+        hint = "超过当前已存入数量";
+        err = "存款不足";
+      } else {
+        hint = "确认后 Token 将从 TokenBank 转回钱包";
+      }
+    }
+  } else {
+    const recipient = $("recipientInput").value.trim();
+    const isBankRecipient =
+      isValidAddress(CONFIG.bankAddress) &&
+      recipient.toLowerCase() === CONFIG.bankAddress.toLowerCase();
+    const recipientValid =
+      isValidAddress(recipient) &&
+      recipient.toLowerCase() !== ethers.ZeroAddress.toLowerCase() &&
+      !isBankRecipient;
+    const transferBtn = $("transferBtn");
+    if (!transferBtn.dataset.busy) {
+      transferBtn.disabled =
+        !connected || amount === null || !recipientValid || amount > state.walletBalance;
+      $("transferBtnText").textContent = "Step 2: 确认转账";
+    }
+
+    if (connected) {
+      if (!recipient) {
+        hint = "输入接收地址和金额";
+      } else if (isBankRecipient) {
+        hint = "这是 TokenBank 地址，请用 Deposit 存款";
+        err = err || "请用存款";
+      } else if (!recipientValid) {
+        hint = "请检查接收地址（不能是零地址）";
+        err = err || "地址不合法";
+      } else if (amount === null) {
+        hint = "输入要转出的金额";
+      } else if (amount > state.walletBalance) {
+        hint = "钱包余额不足以完成此次转账";
+        err = "余额不足";
+      } else {
+        hint = "确认后 " + fmtAmount(amount) + " " + state.symbol + " 将转给接收地址";
+      }
+    }
+  }
+
+  $("actionHint").textContent = hint;
+  $("actionErr").textContent = err;
+}
+
+/* ---------------------------- 授权 / 存款 / 取款 ---------------------------- */
+async function approve() {
+  if (!state.account) return;
+  const unlimited = isUnlimitedMode();
+  let amount;
+  try {
+    amount = unlimited ? ethers.MaxUint256 : parseAmount($("amountInput").value);
+  } catch (e) {
+    toast(e.message, "error");
+    return;
+  }
+
+  const btn = $("approveBtn");
+  const textEl = $("approveBtnText");
+  try {
+    setActionBusy(btn, textEl, true, unlimited ? "无限授权中…" : "授权中…");
+    const tx = await state.token.approve(CONFIG.bankAddress, amount);
+    toast("授权交易已提交，等待确认…", "info");
+    await tx.wait();
+    toast(unlimited ? "无限授权成功" : "授权成功");
+    await refreshBalances();
+  } catch (e) {
+    toast(humanError(e), "error");
+  } finally {
+    setActionBusy(btn, textEl, false);
+  }
+}
+
+function scheduleRecordRefresh() {
+  setTimeout(() => loadRecords(), 2500);
+  setTimeout(() => loadRecords(), 6000);
+}
+
+async function deposit() {
+  if (!state.account) return;
+  let amount;
+  try {
+    amount = parseAmount($("amountInput").value);
+  } catch (e) {
+    toast(e.message, "error");
+    return;
+  }
+
+  const quick = isQuickDepositMode();
+  const btn = $("depositBtn");
+  const textEl = $("depositBtnText");
+  try {
+    setActionBusy(btn, textEl, true, quick ? "一步存款中…" : "存款确认中…");
+    const tx = quick
+      ? await state.token.transferAndCall(CONFIG.bankAddress, amount, "0x")
+      : await state.bank.deposit(amount);
+    toast(quick ? "一步存款交易已提交，等待确认…" : "存款交易已提交，等待确认…", "info");
+    await tx.wait();
+    toast(quick ? "一步存款成功" : "存款成功");
+    $("amountInput").value = "";
+    await refreshAll();
+    scheduleRecordRefresh();
+  } catch (e) {
+    toast(humanError(e), "error");
+  } finally {
+    setActionBusy(btn, textEl, false);
+    updateButtons();
+  }
+}
+
+async function withdraw() {
+  if (!state.account) return;
+  let amount;
+  try {
+    amount = parseAmount($("amountInput").value);
+  } catch (e) {
+    toast(e.message, "error");
+    return;
+  }
+
+  const btn = $("withdrawBtn");
+  const textEl = $("withdrawBtnText");
+  try {
+    setActionBusy(btn, textEl, true, "取款确认中…");
+    const tx = await state.bank.withdraw(amount);
+    toast("取款交易已提交，等待确认…", "info");
+    await tx.wait();
+    toast("取款成功");
+    $("amountInput").value = "";
+    await refreshAll();
+    scheduleRecordRefresh();
+  } catch (e) {
+    toast(humanError(e), "error");
+  } finally {
+    setActionBusy(btn, textEl, false);
+  }
+}
+
+async function transferToken() {
+  if (!state.account) return;
+  let amount;
+  try {
+    amount = parseAmount($("amountInput").value);
+  } catch (e) {
+    toast(e.message, "error");
+    return;
+  }
+
+  const to = $("recipientInput").value.trim();
+  if (!isValidAddress(to) || to.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
+    toast("接收地址不合法", "error");
+    return;
+  }
+  if (isValidAddress(CONFIG.bankAddress) && to.toLowerCase() === CONFIG.bankAddress.toLowerCase()) {
+    toast("这是 TokenBank 地址，请使用 Deposit 存款", "error");
+    return;
+  }
+  if (amount > state.walletBalance) {
+    toast("钱包余额不足", "error");
+    return;
+  }
+
+  const btn = $("transferBtn");
+  const textEl = $("transferBtnText");
+  try {
+    setActionBusy(btn, textEl, true, "转账确认中…");
+    const tx = await state.token.transfer(to, amount);
+    toast("转账交易已提交，等待确认…", "info");
+    await tx.wait();
+    toast("转账成功");
+    $("amountInput").value = "";
+    await refreshAll();
+    scheduleRecordRefresh();
+  } catch (e) {
+    toast(humanError(e), "error");
+  } finally {
+    setActionBusy(btn, textEl, false);
+  }
+}
+
+/* ---------------------------- 转账记录 ---------------------------- */
+async function loadRecords() {
+  if (!state.account) return;
+  try {
+    const url = CONFIG.apiBase + "/api/addresses/" + encodeURIComponent(state.account) +
+      "/transfers?limit=" + CONFIG.recordsLimit;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "索引服务返回 " + res.status);
+    }
+    const data = await res.json();
+    state.records = Array.isArray(data.transfers) ? data.transfers : [];
+    state.recordsError = "";
+  } catch (e) {
+    state.records = [];
+    state.recordsError =
+      "无法获取转账记录：" + (e.message || "索引服务不可用") +
+      "。请确认 npm run indexer 已启动。";
+  }
+  renderLedger();
+}
+
+const TYPE_META = {
+  deposit: {
+    title: "Vault Deposit",
+    sub: "存入 TokenBank",
+    icon: "i-down-left",
+    tone: "green",
+    filter: "deposit",
+    sign: "+",
+    amountClass: "positive",
+  },
+  withdraw: {
+    title: "Vault Withdrawal",
+    sub: "从 TokenBank 取回",
+    icon: "i-up-right",
+    tone: "cyan",
+    filter: "withdraw",
+    sign: "−",
+    amountClass: "negative",
+  },
+  "transfer-in": {
+    title: "Token Received",
+    sub: "ERC-20 Transfer",
+    icon: "i-down-left",
+    tone: "cyan",
+    filter: "transfer",
+    sign: "+",
+    amountClass: "positive",
+  },
+  "transfer-out": {
+    title: "Token Sent",
+    sub: "ERC-20 Transfer",
+    icon: "i-up-right",
+    tone: "ghost",
+    filter: "transfer",
+    sign: "−",
+    amountClass: "negative",
+  },
+  self: {
+    title: "Self Transfer",
+    sub: "ERC-20 Transfer",
+    icon: "i-refresh",
+    tone: "ghost",
+    filter: "transfer",
+    sign: "±",
+    amountClass: "negative",
+  },
+};
+
+function classifyRecord(record) {
+  if (!state.account || !isValidAddress(CONFIG.bankAddress)) {
+    return record.direction === "in" ? "transfer-in"
+      : record.direction === "out" ? "transfer-out"
+      : "self";
+  }
+  const me = state.account.toLowerCase();
+  const bank = CONFIG.bankAddress.toLowerCase();
+  const from = String(record.from || "").toLowerCase();
+  const to = String(record.to || "").toLowerCase();
+
+  if (from === me && to === bank) return "deposit";
+  if (from === bank && to === me) return "withdraw";
+  if (from === me && to === me) return "self";
+  return record.direction === "in" ? "transfer-in" : "transfer-out";
+}
+
+function recordCounterparty(record, type) {
+  if (type === "deposit" || type === "transfer-out") return record.to;
+  if (type === "withdraw" || type === "transfer-in") return record.from;
+  return record.to;
+}
+
+function filteredRecords() {
+  const q = state.search;
+  return state.records.filter((record) => {
+    const type = classifyRecord(record);
+    const meta = TYPE_META[type];
+    if (state.filter !== "all" && meta.filter !== state.filter) return false;
+    if (!q) return true;
+    return [record.txHash, record.from, record.to, meta.title, record.amountFormatted]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(q));
+  });
+}
+
+function makeEl(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function makeIcon(name, className) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon" + (className ? " " + className : ""));
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#" + name);
+  svg.appendChild(use);
+  return svg;
+}
+
+function renderLedgerRow(record) {
+  const type = classifyRecord(record);
+  const meta = TYPE_META[type];
+  const tr = document.createElement("tr");
+
+  const typeTd = makeEl("td");
+  const typeCell = makeEl("div", "type-cell");
+  const iconWrap = makeEl("div", "type-icon " + meta.tone);
+  iconWrap.appendChild(makeIcon(meta.icon));
+  const typeText = makeEl("div");
+  typeText.append(makeEl("div", "type-title", meta.title), makeEl("div", "type-sub", meta.sub));
+  typeCell.append(iconWrap, typeText);
+  typeTd.appendChild(typeCell);
+
+  const amountTd = makeEl("td");
+  amountTd.appendChild(
+    makeEl("div", "cell-amount " + meta.amountClass,
+      meta.sign + fmtAmount(BigInt(record.amount)) + " " + state.symbol),
+  );
+  amountTd.appendChild(
+    makeEl("div", "cell-sub",
+      type === "deposit" ? "TokenBank deposit"
+        : type === "withdraw" ? "TokenBank withdraw"
+        : "ERC-20 transfer"),
+  );
+
+  const counterparty = recordCounterparty(record, type);
+  const addrTd = makeEl("td");
+  const addrBtn = makeEl("button", "addr-chip", shortAddress(counterparty));
+  addrBtn.type = "button";
+  addrBtn.title = counterparty + "（点击复制）";
+  addrBtn.addEventListener("click", () => copyText(counterparty));
+  addrTd.appendChild(addrBtn);
+
+  const txTd = makeEl("td");
+  const txCell = makeEl("div", "hash-cell");
+  txCell.appendChild(makeEl("span", "hash-chip", shortAddress(record.txHash)));
+  const copyBtn = makeEl("button", "mini-icon");
+  copyBtn.type = "button";
+  copyBtn.title = "复制交易哈希";
+  copyBtn.appendChild(makeIcon("i-copy"));
+  copyBtn.addEventListener("click", () => copyText(record.txHash));
+  txCell.appendChild(copyBtn);
+
+  const link = explorerTx(record.txHash);
+  if (link) {
+    const a = document.createElement("a");
+    a.className = "mini-icon";
+    a.href = link;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.title = "在区块浏览器查看";
+    a.appendChild(makeIcon("i-external"));
+    txCell.appendChild(a);
+  }
+  txTd.appendChild(txCell);
+
+  const blockTd = makeEl("td", "block-cell");
+  blockTd.appendChild(makeEl("div", "", timeAgo(record.time)));
+  blockTd.appendChild(makeEl("div", "cell-sub", "Block #" + record.blockNumber));
+
+  const statusTd = makeEl("td");
+  const status = makeEl("span", "status-pill");
+  status.appendChild(makeEl("span", "status-dot"));
+  status.appendChild(document.createTextNode("Confirmed"));
+  statusTd.appendChild(status);
+
+  tr.append(typeTd, amountTd, addrTd, txTd, blockTd, statusTd);
+  return tr;
+}
+
+function renderLedger() {
+  const body = $("ledgerBody");
+  const table = $("ledgerTable");
+  const empty = $("emptyState");
+  const iconUse = $("emptyIconUse");
+  const title = $("emptyTitle");
+  const text = $("emptyText");
+
+  body.innerHTML = "";
+  const showEmpty = (icon, heading, message) => {
+    table.hidden = true;
+    empty.classList.add("show");
+    iconUse.setAttribute("href", "#" + icon);
+    title.textContent = heading;
+    text.textContent = message;
+    $("showingText").textContent = "—";
+    $("pageLabel").textContent = "1 / 1";
+    $("prevPage").disabled = true;
+    $("nextPage").disabled = true;
+  };
+
+  if (state.recordsError) {
+    showEmpty("i-alert", "索引服务不可用", state.recordsError);
+    return;
+  }
+  if (!state.account) {
+    showEmpty("i-history", "连接钱包", "连接钱包后，这里会显示该地址在索引服务中的转账记录。");
+    return;
+  }
+  if (!state.records.length) {
+    showEmpty("i-history", "暂无记录", "完成一次转账、存款或取款后，索引服务会在这里显示。");
+    return;
+  }
+
+  const rows = filteredRecords();
+  if (!rows.length) {
+    showEmpty("i-search", "没有匹配记录", "换一个筛选条件或清空搜索关键词再试。");
+    return;
+  }
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / CONFIG.pageSize));
+  if (state.page >= pageCount) state.page = pageCount - 1;
+  if (state.page < 0) state.page = 0;
+
+  const start = state.page * CONFIG.pageSize;
+  const pageRows = rows.slice(start, start + CONFIG.pageSize);
+
+  table.hidden = false;
+  empty.classList.remove("show");
+  for (const record of pageRows) body.appendChild(renderLedgerRow(record));
+
+  $("showingText").textContent =
+    "显示 " + (start + 1) + "–" + (start + pageRows.length) + " / 共 " + rows.length + " 条";
+  $("pageLabel").textContent = (state.page + 1) + " / " + pageCount;
+  $("prevPage").disabled = state.page === 0;
+  $("nextPage").disabled = state.page >= pageCount - 1;
+}
+
+/* ---------------------------- 事件绑定 ---------------------------- */
+function bindEvents() {
+  $("connectBtn").addEventListener("click", () => {
+    if (!state.account) connect();
+  });
+  $("disconnectBtn").addEventListener("click", disconnect);
+  $("tabDeposit").addEventListener("click", () => setMode("deposit"));
+  $("tabWithdraw").addEventListener("click", () => setMode("withdraw"));
+  $("tabTransfer").addEventListener("click", () => setMode("transfer"));
+
+  $("approveBtn").addEventListener("click", approve);
+  $("depositBtn").addEventListener("click", deposit);
+  $("withdrawBtn").addEventListener("click", withdraw);
+  $("transferBtn").addEventListener("click", transferToken);
+
+  $("amountInput").addEventListener("input", updateButtons);
+  $("recipientInput").addEventListener("input", updateButtons);
+  document.querySelectorAll("[data-deposit-method]").forEach((btn) => {
+    btn.addEventListener("click", () => setDepositMethod(btn.dataset.depositMethod));
+  });
+  document.querySelectorAll('input[name="allowanceMode"]').forEach((radio) => {
+    radio.addEventListener("change", updateButtons);
+  });
+
+  document.querySelectorAll(".quick-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!state.account) {
+        toast("请先连接钱包", "info");
+        return;
+      }
+      const base = state.mode === "withdraw" ? state.depositBalance : state.walletBalance;
+      const pct = BigInt(btn.dataset.pct || "0");
+      const value = pct >= 100n ? base : (base * pct) / 100n;
+      $("amountInput").value = rawAmount(value);
+      updateButtons();
+    });
+  });
+
+  $("filterBar").addEventListener("click", (event) => {
+    const chip = event.target.closest(".filter-chip");
+    if (!chip) return;
+    state.filter = chip.dataset.filter || "all";
+    state.page = 0;
+    document.querySelectorAll(".filter-chip").forEach((el) => {
+      el.classList.toggle("active", el.dataset.filter === state.filter);
+    });
+    renderLedger();
+  });
+
+  $("searchInput").addEventListener("input", (event) => {
+    state.search = event.target.value.trim().toLowerCase();
+    state.page = 0;
+    renderLedger();
+  });
+
+  $("refreshBtn").addEventListener("click", async () => {
+    const btn = $("refreshBtn");
+    btn.classList.add("spinning");
+    try {
+      await refreshAll();
+      toast("记录已刷新", "info");
+    } finally {
+      setTimeout(() => btn.classList.remove("spinning"), 500);
+    }
+  });
+
+  $("prevPage").addEventListener("click", () => {
+    if (state.page > 0) {
+      state.page -= 1;
+      renderLedger();
+    }
+  });
+  $("nextPage").addEventListener("click", () => {
+    state.page += 1;
+    renderLedger();
+  });
+
+  $("infoBtn").addEventListener("click", () => {
+    toast(
+      "TokenBank " + shortAddress(CONFIG.bankAddress) + " · Token " + state.symbol + " " +
+      shortAddress(CONFIG.tokenAddress),
+      "info",
+    );
+  });
+
+  document.querySelectorAll(".nav-link").forEach((link) => {
+    link.addEventListener("click", () => {
+      document.querySelectorAll(".nav-link").forEach((el) => el.classList.remove("active"));
+      link.classList.add("active");
+    });
+  });
+
+  if (window.ethereum) {
+    window.ethereum.on("accountsChanged", async (accounts) => {
+      if (!accounts || accounts.length === 0) {
+        disconnect();
+        return;
+      }
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        await ensureChain(provider);
+        await setup(accounts[0], provider);
+      } catch (e) {
+        toast(humanError(e), "error");
+      }
+    });
+    window.ethereum.on("chainChanged", () => location.reload());
+  }
+}
+
+/* ---------------------------- 启动 ---------------------------- */
+async function init() {
+  bindEvents();
+  applyDepositMethodUI();
+  applyMeta();
+  renderMetrics();
+  updateButtons();
+  renderLedger();
+
+  await hydrateFromApi();
+  applyMeta();
+  await loadPublicData();
+
+  if (!isConfigured()) $("configBanner").classList.add("show");
+
+  // 已经授权过 MetaMask 的话，静默重连；网络不对时不弹窗，点「连接钱包」再切。
+  if (window.ethereum && isConfigured()) {
+    try {
+      const accounts = await window.ethereum.request({ method: "eth_accounts" });
+      if (accounts && accounts.length > 0) {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const network = await provider.getNetwork();
+        if (Number(network.chainId) === CONFIG.chainId) {
+          await setup(accounts[0], provider);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 链上余额 + 索引记录定时刷新（索引服务有轮询延迟，5 秒足够）
+  setInterval(() => {
+    if (state.account && !state.refreshing) {
+      refreshAll().catch(() => {});
+    }
+  }, 5000);
+}
+
+init();
+</script>
+</body>
+</html>

@@ -79,6 +79,11 @@ async function main() {
   if (onChainId !== config.chainId) {
     throw new Error(`CHAIN_ID=${config.chainId} 与 RPC 实际链 ID ${onChainId} 不一致，请检查配置`);
   }
+  if (!config.marketAddress) {
+    throw new Error(
+      'MARKET_ADDRESS 未配置。npm start 仅用于监听 NFTMarket；TokenBank demo 请用 npm run indexer',
+    );
+  }
 
   // 2. 从市场合约读取支付代币和 NFT 地址，同时校验地址上确实有合约。
   const [tokenAddress, nftAddress] = await Promise.all([

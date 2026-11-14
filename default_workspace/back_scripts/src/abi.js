@@ -24,6 +24,15 @@ export const marketAbi = parseAbi([
   'function delist(uint256 tokenId)',
 ]);
 
+/** TokenBank 用到的 ABI（校验绑定代币、读取 TVL 等）。 */
+export const bankAbi = parseAbi([
+  'function token() view returns (address)',
+  'function deposits(address user) view returns (uint256)',
+  'function totalDeposits() view returns (uint256)',
+  'event Deposited(address indexed user, uint256 amount, uint256 userDeposit)',
+  'event Withdrawn(address indexed user, uint256 amount, uint256 userDeposit)',
+]);
+
 /** 支付代币（CalledToken / ERC20）用到的 ABI。 */
 export const erc20Abi = parseAbi([
   'event Transfer(address indexed from, address indexed to, uint256 value)',

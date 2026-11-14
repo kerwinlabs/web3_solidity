@@ -1,7 +1,47 @@
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { extname, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { formatUnits, getAddress, isAddress } from 'viem';
 
 const MAX_LIMIT = 200;
+
+/** 静态前端目录（back_scripts/frontend），由索引服务顺带提供访问。 */
+const FRONTEND_DIR = fileURLToPath(new URL('../frontend/', import.meta.url)).replace(
+  /[\\/]+$/,
+  '',
+);
+
+const STATIC_MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+
+/** 读取并返回 frontend 下的静态文件；不存在或不允许的扩展名返回 false。 */
+async function serveStaticFile(pathname, res) {
+  if (pathname.includes('..')) return false;
+  const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  const filePath = resolve(FRONTEND_DIR, relative);
+  if (!filePath.startsWith(FRONTEND_DIR + sep)) return false;
+
+  const mime = STATIC_MIME[extname(filePath).toLowerCase()];
+  if (!mime) return false;
+
+  let data;
+  try {
+    data = await readFile(filePath);
+  } catch {
+    return false;
+  }
+  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
+  res.end(data);
+  return true;
+}
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body, (_, value) =>
@@ -32,7 +72,7 @@ function readIntParam(value, fallback, { min, max }) {
  *   GET /api/addresses/:address/transfers?direction=all|in|out&limit=&offset=
  *   GET /api/transfers?address=0x...（等价写法）
  */
-export function createApiServer({ index, tokenMeta, state }) {
+export function createApiServer({ index, tokenMeta, state, bankAddress = null }) {
   const server = createServer((req, res) => {
     handle(req, res).catch((error) => {
       if (res.headersSent) {
@@ -70,11 +110,19 @@ export function createApiServer({ index, tokenMeta, state }) {
         token: tokenMeta.address,
         symbol: tokenMeta.symbol,
         decimals: tokenMeta.decimals,
+        bankAddress,
         indexedBlock: state.indexedBlock,
         latestBlock: state.latestBlock,
         lastError: state.lastError,
         startedAt: state.startedAt,
       });
+      return;
+    }
+
+    // 非 API 路径交给前端静态文件（访问 http://127.0.0.1:3000/ 打开页面）。
+    if (!url.pathname.startsWith('/api/')) {
+      if (await serveStaticFile(url.pathname, res)) return;
+      sendJson(res, 404, { error: '接口或文件不存在' });
       return;
     }
 

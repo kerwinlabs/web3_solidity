@@ -3,17 +3,6 @@ import { isAddress } from 'viem';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-function readMarketAddress() {
-  const value = (process.env.MARKET_ADDRESS ?? '').trim();
-  if (!value || !isAddress(value)) {
-    throw new Error('环境变量 MARKET_ADDRESS 缺失或不是合法地址，请先复制 .env.example 为 .env 并填写');
-  }
-  if (value.toLowerCase() === ZERO_ADDRESS) {
-    throw new Error('环境变量 MARKET_ADDRESS 仍是示例里的零地址，请填写真实的 NFTMarket 地址');
-  }
-  return value;
-}
-
 function readChainId() {
   const value = Number(process.env.CHAIN_ID ?? 31337);
   if (!Number.isSafeInteger(value) || value <= 0) {
@@ -64,6 +53,16 @@ function readOptionalAddress(name) {
   return value;
 }
 
+/**
+ * NFTMarket 地址只给 `npm start` / `npm run demo` 使用。
+ * TokenBank 索引和账户互转不依赖 NFTMarket，因此这里允许留空。
+ */
+function readOptionalMarketAddress() {
+  const value = readOptionalAddress('MARKET_ADDRESS');
+  if (!value || value.toLowerCase() === ZERO_ADDRESS) return undefined;
+  return value;
+}
+
 function readTokenDecimalsOverride() {
   const raw = process.env.TOKEN_DECIMALS;
   if (raw === undefined || raw.trim() === '') return undefined;
@@ -77,8 +76,8 @@ function readTokenDecimalsOverride() {
 export const config = {
   /** 节点 RPC 地址 */
   rpcUrl: process.env.RPC_URL?.trim() || 'http://127.0.0.1:8545',
-  /** NFTMarket 合约地址 */
-  marketAddress: readMarketAddress(),
+  /** NFTMarket 合约地址（仅 NFTMarket 监听 / demo 使用，TokenBank demo 可留空） */
+  marketAddress: readOptionalMarketAddress(),
   /** 链 ID */
   chainId: readChainId(),
   /** 轮询间隔（毫秒） */
@@ -88,9 +87,11 @@ export const config = {
   /** 手动覆盖的代币精度；不填则自动读取 */
   tokenDecimals: readTokenDecimalsOverride(),
 
-  // ===== 索引服务 =====
-  /** 要索引的 ERC20 地址；不填则从市场合约的 token() 读取 */
+  // ===== TokenBank / 索引服务 =====
+  /** 要索引的 CalledToken 地址（npm run indexer / npm run transfer 必填） */
   tokenAddress: readOptionalAddress('TOKEN_ADDRESS'),
+  /** TokenBank 地址；前端会通过 /api/status 读取，不填则只能通过 URL 参数配置 */
+  bankAddress: readOptionalAddress('BANK_ADDRESS'),
   /** SQLite 数据库文件路径 */
   dbPath: (process.env.DB_PATH ?? './data/indexer.db').trim() || './data/indexer.db',
   /** REST API 监听端口 */

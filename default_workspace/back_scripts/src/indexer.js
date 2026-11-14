@@ -2,7 +2,7 @@
 import 'dotenv/config';
 import { getAddress } from 'viem';
 
-import { erc20Abi, marketAbi } from './abi.js';
+import { bankAbi, erc20Abi } from './abi.js';
 import { createApiServer } from './api.js';
 import { publicClient } from './client.js';
 import { config } from './config.js';
@@ -16,16 +16,15 @@ const state = {
   startedAt: new Date().toISOString(),
 };
 
-/** 确定要索引的代币地址：优先 .env 的 TOKEN_ADDRESS，否则从市场合约读取。 */
+/** 确定要索引的代币：TokenBank demo 直接使用 .env 的 TOKEN_ADDRESS。 */
 async function resolveTokenMeta() {
-  const tokenAddress =
-    config.tokenAddress ??
-    (await publicClient.readContract({
-      address: config.marketAddress,
-      abi: marketAbi,
-      functionName: 'token',
-    }));
+  if (!config.tokenAddress) {
+    throw new Error(
+      'TOKEN_ADDRESS 未配置：请先运行 TokenBankDemo 部署脚本，并把 CalledToken 地址填入 .env',
+    );
+  }
 
+  const tokenAddress = config.tokenAddress;
   const [symbol, decimals] = await Promise.all([
     publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'symbol' }),
     publicClient.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'decimals' }),
@@ -128,10 +127,31 @@ async function main() {
   }
 
   const tokenMeta = await resolveTokenMeta();
+
+  // 可选校验：BANK_ADDRESS 绑定的代币必须是 TOKEN_ADDRESS，避免前端显示错资产。
+  if (config.bankAddress) {
+    const bankToken = await publicClient.readContract({
+      address: config.bankAddress,
+      abi: bankAbi,
+      functionName: 'token',
+    });
+    if (getAddress(bankToken) !== tokenMeta.address) {
+      throw new Error(
+        `BANK_ADDRESS 绑定的代币是 ${getAddress(bankToken)}，` +
+          `与 TOKEN_ADDRESS ${tokenMeta.address} 不一致；请检查 .env`,
+      );
+    }
+  }
+
   const index = new TransferIndex(config.dbPath);
   state.indexedBlock = index.getCursor();
 
-  const server = createApiServer({ index, tokenMeta, state });
+  const server = createApiServer({
+    index,
+    tokenMeta,
+    state,
+    bankAddress: config.bankAddress ?? null,
+  });
   await listen(server, config.port);
 
   console.log('════════════════════════════════════════════════════════');
@@ -142,7 +162,9 @@ async function main() {
   console.log(
     ` 起始游标  : ${state.indexedBlock === null ? config.indexFromBlock : `区块 ${state.indexedBlock}`}`,
   );
+  console.log(` TokenBank : ${config.bankAddress ?? '未配置（前端可加 ?bank=0x...）'}`);
   console.log(` REST API  : http://127.0.0.1:${config.port}`);
+  console.log(` 前端页面  : http://127.0.0.1:${config.port}/`);
   console.log('   GET /health');
   console.log('   GET /api/status');
   console.log('   GET /api/addresses/:address/transfers?direction=all|in|out&limit=50&offset=0');
