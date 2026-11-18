@@ -9,7 +9,8 @@
     "start": "node src/index.js",
     "demo": "node src/demo.js",
     "transfer": "node src/transfer-demo.js",
-    "indexer": "node src/indexer.js"
+    "indexer": "node src/indexer.js",
+    "wallet": "node src/cli-wallet.js"
   },
   "engines": {
     "node": ">=22.5"

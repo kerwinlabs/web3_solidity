@@ -38,6 +38,7 @@ back_scripts/
 └── src/
     ├── abi.js         # ERC20 / TokenBank（以及可选 NFTMarket）ABI
     ├── api.js         # REST API + 前端静态托管
+    ├── cli-wallet.js   # Sepolia 命令行钱包（createAccount / getBalance / send）
     ├── client.js      # 公共 viem client
     ├── config.js      # .env 读取与校验
     ├── db.js          # SQLite 建表、插入与查询
@@ -221,6 +222,42 @@ npm run transfer
 | `TRANSFER_DELAY_MS` | 1500 | 每笔交易间隔（毫秒） |
 | `TRANSFER_PRIVATE_KEYS` | 空 | 逗号分隔私钥；非 anvil 链或自定义账户时使用 |
 | `ANVIL_MNEMONIC` | anvil 默认助记词 | 自定义 anvil 助记词时覆盖 |
+
+## Sepolia 命令行钱包（npm run wallet）
+
+`src/cli-wallet.js` 是一个不依赖 MetaMask 的命令行钱包 demo，使用 viem 在本地签名：
+
+```bash
+# 1. 生成并保存账户（私钥保存在 data/cli-wallet.json，权限 0600，目录已 gitignore）
+npm run wallet -- createAccount
+# 重新生成（会覆盖旧账户，请谨慎）
+npm run wallet -- createAccount --force
+
+# 2. 查询某个地址的 ERC-20 余额和 Sepolia ETH 余额
+npm run wallet -- getBalance 0x你的地址
+
+# 3. 用 createAccount 生成的账户发送 ERC-20 转账
+npm run wallet -- send 0x接收地址 10
+```
+
+`send` 的实现流程：
+
+1. 读取 `data/cli-wallet.json` 中的私钥并推导地址；
+2. 读取代币 `decimals` / `symbol` / `balanceOf`，把人类可读的 `amount` 转成最小单位；
+3. 编码 `transfer(to, amount)` 的 calldata；
+4. 构造 **EIP-1559（type=2）** 交易：`nonce`、`gas`、`maxFeePerGas`、
+   `maxPriorityFeePerGas`，`to` 是 Token 合约，`value` 为 0；
+5. 本地签名后调用 `eth_sendRawTransaction`，等待 Sepolia 回执并打印交易哈希。
+
+默认配置：
+
+- 代币：`0x3ef32ca45D86cAbE1F0BEfc92f1F8E5788a4de40`，可用 `SEPOLIA_TOKEN_ADDRESS` 覆盖；
+- RPC：优先 `SEPOLIA_RPC_URL`；若 `CHAIN_ID=11155111` 则复用 `RPC_URL`；
+  否则使用公共节点 `https://ethereum-sepolia-rpc.publicnode.com`；
+- 账户文件：默认 `data/cli-wallet.json`，可用 `CLI_WALLET_FILE` 覆盖。
+
+> 这是 Sepolia 测试网钱包 demo。私钥只保存在本地文件中，不要提交、不要用于主网资产。
+> 发送前需要该账户持有 Sepolia ETH（支付 gas）和对应 ERC-20 代币。
 
 ## 附：NFTMarket 监听（与本 demo 独立）
 
