@@ -62,6 +62,8 @@ async function indexOnce(index, tokenMeta) {
   const to = rangeEnd < safeLatest ? rangeEnd : safeLatest;
 
   // getContractEvents 会按事件 topic 过滤并解码，只返回 Transfer。
+  // 每条 log 自带：blockHash、blockNumber、transactionHash、logIndex（以及新版 viem 的 blockTimestamp）。
+  // 注意：log 里没有 parentHash —— 它属于区块头，只能通过 getBlock 获取（见下方取区块信息的逻辑）。
   const logs = await publicClient.getContractEvents({
     address: tokenMeta.address,
     abi: erc20Abi,
@@ -71,6 +73,10 @@ async function indexOnce(index, tokenMeta) {
   });
 
   // 新版 viem 的日志自带 blockTimestamp；旧版本没有时再逐块读取，方便 API 展示。
+  // 如果需要 block.hash / block.parentHash（例如做 reorg 检测），也只能在这里用 getBlock 取：
+  //   const block = await publicClient.getBlock({ blockNumber });
+  //   block.hash / block.parentHash / block.timestamp
+  // 另外注意按 blockNumber 去重 —— 一个区块可能产出多条 Transfer。
   const missingTimestampBlocks = [
     ...new Set(logs.filter((log) => log.blockTimestamp === undefined).map((log) => log.blockNumber.toString())),
   ];
@@ -90,6 +96,7 @@ async function indexOnce(index, tokenMeta) {
     txHash: log.transactionHash.toLowerCase(),
     logIndex: Number(log.logIndex),
     blockNumber: Number(log.blockNumber),
+    // 若需要区块 hash，直接取 log.blockHash 即可；parentHash 不在 log 中，须走 getBlock。
     blockTimestamp:
       log.blockTimestamp !== undefined
         ? Number(log.blockTimestamp)

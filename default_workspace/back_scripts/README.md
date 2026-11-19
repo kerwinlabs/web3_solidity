@@ -4,15 +4,19 @@
 
 - `npm run indexer`：索引 `CalledToken` 的 ERC-20 `Transfer` 事件到 SQLite，提供 REST API，
   并在 `http://127.0.0.1:3000/` 托管前端页面；
-- 前端连接 MetaMask，展示余额 / 存款 / 授权额度，支持普通转账、两种存款方式、取款，
+- 前端连接 MetaMask，展示余额 / 存款 / 授权额度，支持普通转账、三种存款方式
+  （两步授权 / `transferAndCall` 一步 / Permit 离线签名）、取款，
   并展示该地址的转账、存款、取款记录；
 - `npm run transfer`：用 anvil 账户互相转账，生成可供索引和页面展示的记录。
 
 对应合约：
 
 - `forge_project/src/CalledToken.sol`：OpenZeppelin ERC20 + `transferAndCall` 回调；
-- `forge_project/src/TokenBank.sol`：记录每人存入数量，支持 `deposit` / `withdraw`，
-  也支持 CalledToken 的 `transferAndCall` 直接存款。
+- `forge_project/src/MyPermitToken.sol`：`CalledToken` + OpenZeppelin `ERC20Permit`，
+  额外支持 EIP-2612 `permit` 离线授权；
+- `forge_project/src/TokenBank.sol`：记录每人存入数量，支持 `deposit` / `withdraw`、
+  CalledToken 的 `transferAndCall` 直接存款，以及 `permitDeposit`
+  （校验 Permit 签名后一次完成授权 + 存款）。
 
 ## 前端可以连接 MetaMask 吗？
 
@@ -21,7 +25,8 @@
 - 连接 / 断开钱包、`accountsChanged` / `chainChanged` 处理；
 - 网络不是 31337 时自动请求切换（或添加本地链）；
 - 读取 `balanceOf`、`allowance`、`deposits`、`totalDeposits`；
-- 发起 `approve`、`deposit`、`transferAndCall`、`withdraw` 交易并等待确认。
+- 发起 `approve`、`deposit`、`transferAndCall`、`withdraw`、`permitDeposit` 交易并等待确认；
+- 用 `eth_signTypedData_v4` 对 EIP-2612 Permit 做离线签名，再提交 `permitDeposit`。
 
 因此**不需要新建独立前端项目**。`frontend/index.html` 是零构建的独立静态页面，
 默认由索引服务同源托管；也可以单独部署到任意静态服务器，用 `?api=…` 指向索引服务。
@@ -123,6 +128,23 @@ TOKEN_ADDRESS=0x... PRIVATE_KEY=<私钥> \
 
 不传 `TOKEN_ADDRESS` 时，脚本会读取 `deployments/CalledToken_<chainId>.json`。
 
+### MyPermitTokenDemo（TokenBank + MyPermitToken，演示 Permit 签名存款）
+
+`forge_project/script/MyPermitTokenDemo.s.sol` 部署 `MyPermitToken("Permit Bank Token", "PBT", 1_000_000e18)`
+和绑定它的 `TokenBank`，用于页面的 **Permit 签名** 存款方式：
+
+```bash
+cd forge_project
+PRIVATE_KEY=<私钥> \
+  forge script script/MyPermitTokenDemo.s.sol:MyPermitTokenDemoScript \
+  --rpc-url http://127.0.0.1:8545 --broadcast
+```
+
+脚本会打印部署地址，把它们填入 `back_scripts/.env` 的 `TOKEN_ADDRESS` / `BANK_ADDRESS`
+并重启 `npm run indexer` 即可。Permit 的 EIP-712 签名域为
+`{ name: "Permit Bank Token", version: "1", chainId, verifyingContract: <Token 地址> }`，
+`spender` 必须是 TokenBank 地址；页面会自动用代币 `name()` 构造该签名域。
+
 ## TokenBank 前端
 
 前端代码在 `frontend/index.html`，按 `design/erc20_token_deposit_portal/` 的深色 DeFi
@@ -130,10 +152,13 @@ TOKEN_ADDRESS=0x... PRIVATE_KEY=<私钥> \
 
 - 顶部指标卡：TokenBank TVL、我的存款、钱包余额、授权额度；
 - 中间操作台：`Deposit` / `Withdraw` / `Transfer` 三个 Tab，支持 25% / 50% / 75% / MAX；
-- 存款支持两种方式，可在 `Deposit Mode / 存款方式` 切换：
+- 存款支持三种方式，可在 `Deposit Mode / 存款方式` 切换：
   - **两步授权**：`Step 1 授权`（approve，可选精确金额或无限授权）→ `Step 2 存款`（TokenBank.deposit）；
   - **一步快速**：直接调用 `CalledToken.transferAndCall`，转账与 TokenBank 记账在同一笔交易完成，无需 approve
     （仅适用于 CalledToken；普通 ERC-20 没有该函数）；
+  - **Permit 签名**：先用钱包对 EIP-2612 Permit 做离线签名（不花 gas），再提交一笔
+    `TokenBank.permitDeposit` 完成授权 + 存款（需要代币支持 `permit`，如 `MyPermitToken`）；
+    页面会自动探测代币与 TokenBank 是否支持该方式，不支持时隐藏该选项；
 - 取款直接校验已存入数量，按 checks-effects-interactions 执行；
 - 转账 Tab 填写接收地址和金额，直接调用 `CalledToken.transfer`；
 - 所有操作确认后自动刷新余额并补拉索引记录；
