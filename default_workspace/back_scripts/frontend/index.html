@@ -654,6 +654,9 @@
   }
   .method-switch {
     display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
     padding: 3px;
     border-radius: 8px;
     background: var(--surface-lowest);
@@ -697,6 +700,7 @@
     color: var(--primary);
   }
   .mode-note strong { color: var(--text); font-weight: 600; }
+  .mode-note .permit2-warn { color: var(--danger); font-weight: 500; }
   .action-grid.single { grid-template-columns: 1fr; }
 
   .action-grid {
@@ -1311,7 +1315,7 @@
         <span class="micro-chip">授权额度</span>
       </div>
       <div class="metric-value"><span id="allowanceMetric">--</span><span class="metric-unit js-symbol">MTK</span></div>
-      <div class="metric-foot"><span class="status-dot cyan"></span>Status: Safe ERC-20</div>
+      <div class="metric-foot"><span class="status-dot cyan"></span><span id="allowanceMetricFoot">Status: Safe ERC-20</span></div>
     </article>
   </section>
 
@@ -1391,7 +1395,7 @@
           <span class="mono" id="breakAvailValue">--</span>
         </div>
         <div class="break-row" id="breakAllowanceRow">
-          <span>当前授权额度</span>
+          <span id="breakAllowanceLabel">当前授权额度</span>
           <span class="mono" id="breakAllowanceValue">--</span>
         </div>
         <div class="break-row">
@@ -1432,6 +1436,15 @@
             data-deposit-method="permit"
             title="用 EIP-2612 Permit 离线签名，一笔交易完成授权 + 存款"
           >Permit 签名</button>
+          <button
+            class="method-btn"
+            id="permit2MethodBtn"
+            type="button"
+            role="radio"
+            aria-checked="false"
+            data-deposit-method="permit2"
+            title="先对 Uniswap Permit2 授权一次，之后每笔存款只需离线签名"
+          >Permit2 签名</button>
         </div>
       </div>
 
@@ -1449,6 +1462,16 @@
         <span class="mono">permitDeposit</span> 完成授权 + 转账 + 记账。签名有效期
         <span class="mono" id="permitDeadlineText">30 分钟</span>，每次存款使用当前 nonce 重新签名；
         仅支持 EIP-2612 的代币（如 MyPermitToken）。</span>
+      </div>
+
+      <div class="mode-note" id="permit2DepositNote" hidden>
+        <svg class="icon"><use href="#i-shield" /></svg>
+        <span><strong>Permit2 签名存款：</strong>首次使用先在 Step 1 对 Uniswap Permit2
+        （<span class="mono" id="permit2AddressLabel">—</span>）授权一次，之后每笔存款只需对
+        <span class="mono">PermitTransferFrom(permitted, spender=TokenBank, nonce, deadline)</span>
+        做 EIP-712 离线签名（不消耗 gas），再提交一笔
+        <span class="mono">depositWithPermit2</span> 完成转账与记账。
+        适用于不支持 EIP-2612 的普通 ERC-20。<span id="permit2Status"></span></span>
       </div>
 
       <div class="allowance-mode" id="allowanceModeRow">
@@ -1643,6 +1666,9 @@ const BANK_ABI = [
   "function deposit(uint256 amount)",
   // EIP-2612：owner 离线签名后，任意地址可代提交，一次完成授权 + 存款。
   "function permitDeposit(address owner, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s)",
+  // Uniswap Permit2：TokenBank 调用的 Permit2 地址，以及走 SignatureTransfer 的签名存款。
+  "function PERMIT2() view returns (address)",
+  "function depositWithPermit2(((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline) permit, address owner, bytes signature)",
   "function withdraw(uint256 amount)",
 ];
 
@@ -1659,9 +1685,15 @@ const state = {
   tokenName: "",
   // null = 尚未探测；true / false = 代币是否支持 EIP-2612（读取 nonces 成功与否）。
   permitSupported: null,
+  // Uniswap Permit2：bank.PERMIT2() 返回的地址、bank 是否含 depositWithPermit2、
+  // 该地址在本链上是否真的有代码（本地 anvil 默认没有，需要 fork 链或自行部署）。
+  permit2Address: "",
+  permit2Supported: null,
+  permit2Deployed: false,
   walletBalance: 0n,
   depositBalance: 0n,
   allowance: 0n,
+  permit2Allowance: 0n,
   tvl: 0n,
   tvlLoaded: false,
   mode: "deposit",
@@ -1698,22 +1730,66 @@ function isPermitDepositMode() {
   return state.depositMethod === "permit";
 }
 
+function isPermit2DepositMode() {
+  return state.depositMethod === "permit2";
+}
+
+/** 当前存款方式对应的授权对象：普通两步授权给 TokenBank，Permit2 方式授权给 Permit2 合约。 */
+function allowanceSpender() {
+  return isPermit2DepositMode() ? state.permit2Address : CONFIG.bankAddress;
+}
+
+/** 当前存款方式下、决定 Step 1 是否已完成的授权额度。 */
+function activeAllowance() {
+  return isPermit2DepositMode() ? state.permit2Allowance : state.allowance;
+}
+
+/** 切换存款方式时同步额度相关文案（顶部指标卡和明细行）。 */
+function applyAllowanceLabels() {
+  const permit2 = isPermit2DepositMode();
+  $("allowanceMetricFoot").textContent = permit2
+    ? "Permit2 合约授权额度"
+    : "Status: Safe ERC-20";
+  $("breakAllowanceLabel").textContent = permit2 ? "Permit2 授权额度" : "当前授权额度";
+}
+
+/** 更新 Permit2 合约地址文案，以及“bank 支持但当前链未部署 Permit2”的警告。 */
+function renderPermit2Status() {
+  $("permit2AddressLabel").textContent = state.permit2Address
+    ? shortAddress(state.permit2Address)
+    : "未配置";
+  const status = $("permit2Status");
+  if (state.permit2Supported && !state.permit2Deployed) {
+    status.textContent =
+      " ⚠ 当前链 " + CONFIG.chainId + " 的 Permit2 地址没有合约代码，请改用 fork 网络或在本地部署 Permit2。";
+    status.className = "permit2-warn";
+  } else {
+    status.textContent = "";
+    status.className = "";
+  }
+}
+
 function applyDepositMethodUI() {
   const isDeposit = state.mode === "deposit";
   const quick = isQuickDepositMode();
   const permit = isPermitDepositMode();
-  // transferAndCall / permit 都是一笔交易完成的单步存款，不需要 approve。
+  const permit2 = isPermit2DepositMode();
+  // transferAndCall / permit 都是一笔交易完成的单步存款，不需要 Step 1 授权；
+  // Permit2 方式仍然需要先把 Token 授权给 Permit2 合约（只需一次）。
   const single = quick || permit;
 
-  // 只有探测到代币确实不支持 EIP-2612 时才隐藏该选项；null（未探测）仍保留。
+  // 只有探测到合约确实不支持时才隐藏对应选项；null（尚未探测）仍保留。
   $("permitMethodBtn").hidden = state.permitSupported === false;
+  $("permit2MethodBtn").hidden = state.permit2Supported === false;
   $("depositMethodRow").hidden = !isDeposit;
   $("allowanceModeRow").hidden = !isDeposit || single;
   $("breakAllowanceRow").hidden = !isDeposit || single;
   $("quickDepositNote").hidden = !isDeposit || !quick;
   $("permitDepositNote").hidden = !isDeposit || !permit;
+  $("permit2DepositNote").hidden = !isDeposit || !permit2;
   $("approveBtn").hidden = single;
   $("depositActions").classList.toggle("single", single);
+  applyAllowanceLabels();
 
   document.querySelectorAll("[data-deposit-method]").forEach((btn) => {
     const active = btn.dataset.depositMethod === state.depositMethod;
@@ -1727,10 +1803,15 @@ function setDepositMethod(method) {
     toast("当前 Token 不支持 EIP-2612 Permit", "info");
     return;
   }
-  state.depositMethod = ["approve", "transferAndCall", "permit"].includes(method)
+  if (method === "permit2" && state.permit2Supported === false) {
+    toast("当前 TokenBank 不支持 Permit2 存款", "info");
+    return;
+  }
+  state.depositMethod = ["approve", "transferAndCall", "permit", "permit2"].includes(method)
     ? method
     : "approve";
   applyDepositMethodUI();
+  renderMetrics();
   updateButtons();
 }
 
@@ -1850,8 +1931,9 @@ function renderMetrics() {
   $("tvlValue").textContent = state.tvlLoaded ? fmtAmount(state.tvl) : "--";
   $("depositValue").textContent = connected ? fmtAmount(state.depositBalance) : "--";
   $("walletValue").textContent = connected ? fmtAmount(state.walletBalance) : "--";
+  const displayAllowance = activeAllowance();
   $("allowanceMetric").textContent = connected
-    ? (isInfiniteAllowance(state.allowance) ? "∞" : fmtAmount(state.allowance))
+    ? (isInfiniteAllowance(displayAllowance) ? "∞" : fmtAmount(displayAllowance))
     : "--";
 
   const base = state.mode === "withdraw" ? state.depositBalance : state.walletBalance;
@@ -1862,7 +1944,7 @@ function renderMetrics() {
     ? fmtAmount(base) + " " + state.symbol
     : "--";
   $("breakAllowanceValue").textContent = connected
-    ? (isInfiniteAllowance(state.allowance) ? "无限" : fmtAmount(state.allowance) + " " + state.symbol)
+    ? (isInfiniteAllowance(displayAllowance) ? "无限" : fmtAmount(displayAllowance) + " " + state.symbol)
     : "--";
 }
 
@@ -1915,6 +1997,37 @@ async function loadPublicData() {
     if (state.permitSupported === false && isPermitDepositMode()) {
       state.depositMethod = "approve";
     }
+
+    // 探测 Permit2：先读 TokenBank.PERMIT2() 拿到它实际调用的地址，
+    // 再确认 bank 字节码含 depositWithPermit2、以及该地址在本链上确有代码。
+    // （本地 anvil 默认没有 Permit2，需要 fork 主网/Sepolia 或在本地部署。）
+    state.permit2Address = "";
+    state.permit2Supported = false;
+    state.permit2Deployed = false;
+    if (isValidAddress(CONFIG.bankAddress)) {
+      try {
+        const bank = new ethers.Contract(CONFIG.bankAddress, BANK_ABI, provider);
+        const permit2 = await bank.PERMIT2();
+        state.permit2Address = ethers.getAddress(permit2);
+        // 注意：PermitTransferFrom 在 ABI 里是一个嵌套 tuple 参数，
+        // 正确签名是 depositWithPermit2(((address,uint256),uint256,uint256),address,bytes)。
+        const selector = ethers.id(
+          "depositWithPermit2(((address,uint256),uint256,uint256),address,bytes)",
+        ).slice(2, 10);
+        const [bankCode, permit2Code] = await Promise.all([
+          provider.getCode(CONFIG.bankAddress),
+          provider.getCode(state.permit2Address),
+        ]);
+        state.permit2Supported = bankCode.toLowerCase().includes(selector);
+        state.permit2Deployed = permit2Code !== "0x";
+      } catch (_) {
+        // 旧版 TokenBank 没有 PERMIT2()，视为不支持。
+      }
+    }
+    if (state.permit2Supported === false && isPermit2DepositMode()) {
+      state.depositMethod = "approve";
+    }
+    renderPermit2Status();
 
     applyMeta();
     applyDepositMethodUI();
@@ -2018,6 +2131,7 @@ function disconnect() {
   state.walletBalance = 0n;
   state.depositBalance = 0n;
   state.allowance = 0n;
+  state.permit2Allowance = 0n;
   state.records = [];
   state.recordsError = "";
   state.page = 0;
@@ -2060,15 +2174,20 @@ async function refreshAll() {
 
 async function refreshBalances() {
   if (!state.account) return;
-  const [wallet, deposit, allowance, tvl] = await Promise.all([
+  const [wallet, deposit, allowance, tvl, permit2Allowance] = await Promise.all([
     state.token.balanceOf(state.account),
     state.bank.deposits(state.account),
     state.token.allowance(state.account, CONFIG.bankAddress),
     state.bank.totalDeposits(),
+    // Permit2 方式的额度是「owner → Permit2 合约」，地址未知时按 0 处理。
+    isValidAddress(state.permit2Address)
+      ? state.token.allowance(state.account, state.permit2Address)
+      : Promise.resolve(0n),
   ]);
   state.walletBalance = wallet;
   state.depositBalance = deposit;
   state.allowance = allowance;
+  state.permit2Allowance = permit2Allowance;
   state.tvl = tvl;
   state.tvlLoaded = true;
   renderMetrics();
@@ -2130,21 +2249,27 @@ function updateButtons() {
   if (state.mode === "deposit") {
     const quick = isQuickDepositMode();
     const permit = isPermitDepositMode();
+    const permit2 = isPermit2DepositMode();
     const single = quick || permit;
     const unlimited = isUnlimitedMode();
+    const allowance = activeAllowance();
     const approved = connected && (unlimited
-      ? isInfiniteAllowance(state.allowance)
-      : amount !== null && state.allowance >= amount);
+      ? isInfiniteAllowance(allowance)
+      : amount !== null && allowance >= amount);
 
     const approveBtn = $("approveBtn");
     if (!approveBtn.dataset.busy) {
-      approveBtn.disabled = !connected || approved || (!unlimited && amount === null);
+      approveBtn.disabled =
+        !connected || approved || (!unlimited && amount === null) ||
+        (permit2 && !state.permit2Deployed);
       approveBtn.classList.toggle("is-approved", approved);
       $("approveBtnText").textContent = approved
         ? "Step 1: 已授权"
-        : unlimited
-          ? "Step 1: 无限授权"
-          : "Step 1: 授权 " + state.symbol;
+        : permit2
+          ? (unlimited ? "Step 1: 无限授权 Permit2" : "Step 1: 授权 Permit2")
+          : unlimited
+            ? "Step 1: 无限授权"
+            : "Step 1: 授权 " + state.symbol;
       $("approveIcon").querySelector("use").setAttribute(
         "href",
         approved ? "#i-check-circle" : "#i-shield",
@@ -2155,20 +2280,29 @@ function updateButtons() {
     if (!depositBtn.dataset.busy) {
       depositBtn.disabled =
         !connected || amount === null || amount > state.walletBalance ||
-        (!single && !approved) || (permit && state.permitSupported !== true);
+        (!single && !approved) || (permit && state.permitSupported !== true) ||
+        (permit2 && (!state.permit2Supported || !state.permit2Deployed));
       $("depositBtnText").textContent = quick
         ? "一步存款 · transferAndCall"
         : permit
           ? "Permit 签名存款"
-          : "Step 2: 确认存款";
+          : permit2
+            ? "Permit2 签名存款"
+            : "Step 2: 确认存款";
       $("depositIcon").querySelector("use").setAttribute(
         "href",
-        quick ? "#i-bolt" : permit ? "#i-shield" : "#i-lock",
+        quick ? "#i-bolt" : permit || permit2 ? "#i-shield" : "#i-lock",
       );
     }
 
     if (connected) {
-      if (permit && state.permitSupported !== true) {
+      if (permit2 && state.permit2Supported !== true) {
+        hint = "当前 TokenBank 不支持 Permit2 存款";
+        err = "不支持 Permit2";
+      } else if (permit2 && !state.permit2Deployed) {
+        hint = "当前链上 " + shortAddress(state.permit2Address) + " 没有 Permit2 合约代码";
+        err = "Permit2 未部署";
+      } else if (permit && state.permitSupported !== true) {
         hint = "无法确认代币是否支持 Permit，请检查 RPC / Token 地址";
         err = "不支持 Permit";
       } else if (amount === null) {
@@ -2176,7 +2310,9 @@ function updateButtons() {
           ? "输入金额后，一次交易完成转账与记账"
           : permit
             ? "输入金额后，签名 Permit 并提交一笔交易完成存款"
-            : "输入金额后先授权，再确认存款";
+            : permit2
+              ? "输入金额后，先授权 Permit2，再签名存款"
+              : "输入金额后先授权，再确认存款";
       } else if (amount > state.walletBalance) {
         hint = "钱包余额不足以完成此次存款";
         err = "余额不足";
@@ -2184,6 +2320,10 @@ function updateButtons() {
         hint = "确认后将调用 transferAndCall 一步存入 TokenBank";
       } else if (permit) {
         hint = "先在钱包签名 Permit（离线、不花 gas），再提交 permitDeposit 交易";
+      } else if (permit2 && !approved) {
+        hint = "请先完成 Step 1：把 Token 授权给 Permit2 合约（只需一次）";
+      } else if (permit2) {
+        hint = "Permit2 授权已就绪，确认后先签名 PermitTransferFrom，再提交 depositWithPermit2";
       } else if (!approved) {
         hint = "请先完成 Step 1 授权";
       } else {
@@ -2259,14 +2399,41 @@ async function approve() {
     return;
   }
 
+  const permit2 = isPermit2DepositMode();
+  const spender = allowanceSpender();
+  if (!isValidAddress(spender)) {
+    toast(permit2 ? "未读取到 Permit2 地址，无法授权" : "TokenBank 地址无效，无法授权", "error");
+    return;
+  }
+
   const btn = $("approveBtn");
   const textEl = $("approveBtnText");
   try {
-    setActionBusy(btn, textEl, true, unlimited ? "无限授权中…" : "授权中…");
-    const tx = await state.token.approve(CONFIG.bankAddress, amount);
-    toast("授权交易已提交，等待确认…", "info");
+    setActionBusy(
+      btn,
+      textEl,
+      true,
+      permit2
+        ? (unlimited ? "无限授权 Permit2 中…" : "授权 Permit2 中…")
+        : (unlimited ? "无限授权中…" : "授权中…"),
+    );
+    const tx = await state.token.approve(spender, amount);
+    toast(
+      permit2
+        ? "授权 Permit2 的交易已提交，等待确认…（只需授权一次）"
+        : "授权交易已提交，等待确认…",
+      "info",
+    );
     await tx.wait();
-    toast(unlimited ? "无限授权成功" : "授权成功");
+    toast(
+      permit2
+        ? unlimited
+          ? "无限授权 Permit2 成功，之后每笔存款只需离线签名"
+          : "授权 Permit2 成功"
+        : unlimited
+          ? "无限授权成功"
+          : "授权成功",
+    );
     await refreshBalances();
   } catch (e) {
     toast(humanError(e), "error");
@@ -2349,6 +2516,86 @@ async function permitSignAndDeposit(amount) {
   }
 }
 
+/**
+ * Uniswap Permit2 离线签名存款（SignatureTransfer）：
+ * 1. 前提：之前已把 Token 授权给 Permit2 合约（Step 1，只需一次）；
+ * 2. 构造 PermitTransferFrom，用 EIP-712 离线签名（不花 gas）；
+ * 3. 提交 TokenBank.depositWithPermit2，由 Permit2 校验签名并执行 transferFrom。
+ * 注意：签名域是 Permit2 自己的域 { name: "Permit2", chainId, verifyingContract }，
+ * 没有 version 字段；spender 必须是 TokenBank（调用 permitTransferFrom 的 msg.sender）。
+ * Permit2 的 nonce 是 unordered bitmap，这里用随机 256 位整数，避免与已用过的冲突。
+ */
+async function permit2SignAndDeposit(amount) {
+  const btn = $("depositBtn");
+  const textEl = $("depositBtnText");
+  try {
+    if (!state.permit2Deployed) {
+      throw new Error("当前链上没有 Permit2 合约代码，请使用 fork 网络或在本地部署 Permit2");
+    }
+    if (state.permit2Allowance < amount) {
+      throw new Error("请先完成 Step 1：把 Token 授权给 Permit2 合约（只需一次）");
+    }
+
+    const network = await state.provider.getNetwork();
+    const chainId = Number(network.chainId);
+    if (chainId !== CONFIG.chainId) {
+      throw new Error("钱包网络是 " + chainId + "，请切换到 " + CONFIG.chainId);
+    }
+
+    // 随机 256 位 nonce：Permit2 用 unordered nonce bitmap，任意未用过的值都可以。
+    const nonce = ethers.toBigInt(ethers.hexlify(ethers.randomBytes(32)));
+    const deadline = BigInt(
+      Math.floor(Date.now() / 1000) + CONFIG.permitDeadlineMinutes * 60,
+    );
+
+    const domain = {
+      name: "Permit2",
+      chainId,
+      verifyingContract: state.permit2Address,
+    };
+    const types = {
+      PermitTransferFrom: [
+        { name: "permitted", type: "TokenPermissions" },
+        { name: "spender", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+      TokenPermissions: [
+        { name: "token", type: "address" },
+        { name: "amount", type: "uint256" },
+      ],
+    };
+    const message = {
+      permitted: { token: CONFIG.tokenAddress, amount },
+      spender: CONFIG.bankAddress,
+      nonce,
+      deadline,
+    };
+
+    setActionBusy(btn, textEl, true, "等待签名…");
+    toast("请在钱包中确认 Permit2 签名（离线签名，不消耗 gas）", "info");
+    const signature = await state.signer.signTypedData(domain, types, message);
+
+    textEl.textContent = "提交存款中…";
+    const tx = await state.bank.depositWithPermit2(
+      { permitted: { token: CONFIG.tokenAddress, amount }, nonce, deadline },
+      state.account,
+      signature,
+    );
+    toast("depositWithPermit2 交易已提交，等待确认…", "info");
+    await tx.wait();
+    toast("Permit2 签名存款成功");
+    $("amountInput").value = "";
+    await refreshAll();
+    scheduleRecordRefresh();
+  } catch (e) {
+    toast(humanError(e), "error");
+  } finally {
+    setActionBusy(btn, textEl, false);
+    updateButtons();
+  }
+}
+
 async function deposit() {
   if (!state.account) return;
   let amount;
@@ -2361,6 +2608,11 @@ async function deposit() {
 
   if (isPermitDepositMode()) {
     await permitSignAndDeposit(amount);
+    return;
+  }
+
+  if (isPermit2DepositMode()) {
+    await permit2SignAndDeposit(amount);
     return;
   }
 

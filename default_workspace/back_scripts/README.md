@@ -4,8 +4,8 @@
 
 - `npm run indexer`：索引 `CalledToken` 的 ERC-20 `Transfer` 事件到 SQLite，提供 REST API，
   并在 `http://127.0.0.1:3000/` 托管前端页面；
-- 前端连接 MetaMask，展示余额 / 存款 / 授权额度，支持普通转账、三种存款方式
-  （两步授权 / `transferAndCall` 一步 / Permit 离线签名）、取款，
+- 前端连接 MetaMask，展示余额 / 存款 / 授权额度，支持普通转账、四种存款方式
+  （两步授权 / `transferAndCall` 一步 / Permit 离线签名 / Permit2 离线签名）、取款，
   并展示该地址的转账、存款、取款记录；
 - `npm run transfer`：用 anvil 账户互相转账，生成可供索引和页面展示的记录。
 
@@ -15,8 +15,9 @@
 - `forge_project/src/MyPermitToken.sol`：`CalledToken` + OpenZeppelin `ERC20Permit`，
   额外支持 EIP-2612 `permit` 离线授权；
 - `forge_project/src/TokenBank.sol`：记录每人存入数量，支持 `deposit` / `withdraw`、
-  CalledToken 的 `transferAndCall` 直接存款，以及 `permitDeposit`
-  （校验 Permit 签名后一次完成授权 + 存款）。
+  CalledToken 的 `transferAndCall` 直接存款、`permitDeposit`
+  （校验 EIP-2612 签名后一次完成授权 + 存款），以及 `depositWithPermit2`
+  （走 Uniswap Permit2 的 SignatureTransfer，适用于不支持 EIP-2612 的代币）。
 
 ## 前端可以连接 MetaMask 吗？
 
@@ -25,8 +26,10 @@
 - 连接 / 断开钱包、`accountsChanged` / `chainChanged` 处理；
 - 网络不是 31337 时自动请求切换（或添加本地链）；
 - 读取 `balanceOf`、`allowance`、`deposits`、`totalDeposits`；
-- 发起 `approve`、`deposit`、`transferAndCall`、`withdraw`、`permitDeposit` 交易并等待确认；
-- 用 `eth_signTypedData_v4` 对 EIP-2612 Permit 做离线签名，再提交 `permitDeposit`。
+- 发起 `approve`、`deposit`、`transferAndCall`、`withdraw`、`permitDeposit`、
+  `depositWithPermit2` 交易并等待确认；
+- 用 `eth_signTypedData_v4` 对 EIP-2612 Permit / Permit2 `PermitTransferFrom` 做离线签名，
+  再分别提交 `permitDeposit` / `depositWithPermit2`。
 
 因此**不需要新建独立前端项目**。`frontend/index.html` 是零构建的独立静态页面，
 默认由索引服务同源托管；也可以单独部署到任意静态服务器，用 `?api=…` 指向索引服务。
@@ -145,6 +148,26 @@ PRIVATE_KEY=<私钥> \
 `{ name: "Permit Bank Token", version: "1", chainId, verifyingContract: <Token 地址> }`，
 `spender` 必须是 TokenBank 地址；页面会自动用代币 `name()` 构造该签名域。
 
+### Permit2 签名存款的本地测试
+
+Permit2 采用 CREATE2 部署在固定地址 `0x000000000022D473030F116dDEE9F6B43aC78BA3`，
+**本地 `anvil` 默认没有部署这个合约**，因此在纯本地链上页面会提示
+“Permit2 地址没有合约代码”并禁用 Permit2 方式。可选做法：
+
+- 用 fork 网络启动 anvil（Permit2 地址上已有代码）：
+
+  ```bash
+  anvil --fork-url "$SEPOLIA_RPC_URL"
+  ```
+
+  然后照常部署 `MyPermitTokenDemo` 或 `TokenBankDemo` 并更新 `.env`；
+- 或者在本地链上自行部署 Permit2 源码，但地址会不同——此时页面的
+  `TokenBank.PERMIT2()` 仍是规范地址，签名无法生效，所以推荐 fork 方案。
+
+Permit2 的 EIP-712 签名域为 `{ name: "Permit2", chainId, verifyingContract: <Permit2 地址> }`，
+**没有 version 字段**；`spender` 必须是 TokenBank 地址（即调用 `permitTransferFrom` 的
+`msg.sender`），签名内容是 `PermitTransferFrom(permitted, spender, nonce, deadline)`。
+
 ## TokenBank 前端
 
 前端代码在 `frontend/index.html`，按 `design/erc20_token_deposit_portal/` 的深色 DeFi
@@ -159,6 +182,12 @@ PRIVATE_KEY=<私钥> \
   - **Permit 签名**：先用钱包对 EIP-2612 Permit 做离线签名（不花 gas），再提交一笔
     `TokenBank.permitDeposit` 完成授权 + 存款（需要代币支持 `permit`，如 `MyPermitToken`）；
     页面会自动探测代币与 TokenBank 是否支持该方式，不支持时隐藏该选项；
+  - **Permit2 签名**：适用于不支持 EIP-2612 的普通 ERC-20。
+    Step 1 先把代币 **授权给 Uniswap Permit2 合约**（`0x000000000022D473030F116dDEE9F6B43aC78BA3`，
+    只需一次，可选择无限授权），之后每笔存款只需对
+    `PermitTransferFrom(permitted, spender=TokenBank, nonce, deadline)` 做 EIP-712 离线签名，
+    再提交 `TokenBank.depositWithPermit2`；nonce 使用 Permit2 的 unordered bitmap（页面取随机 256 位）；
+    页面会读取 `TokenBank.PERMIT2()` 探测支持情况，若该地址在本链无合约代码会给出警告；
 - 取款直接校验已存入数量，按 checks-effects-interactions 执行；
 - 转账 Tab 填写接收地址和金额，直接调用 `CalledToken.transfer`；
 - 所有操作确认后自动刷新余额并补拉索引记录；
